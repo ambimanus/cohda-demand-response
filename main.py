@@ -268,7 +268,6 @@ def COHDA_Interface(House, Power, Enviro, Target):
         np.logical_and((House.n[:, 0] == 1), (House.e[:, 0] <= (eset1 + House.u[0])))
     )
 
-    # for it=1:1:k-1
     for it in range(k - 1):
         # House.n[:, it] = np.logical_or(
         #     np.logical_and((House.n[:, it] == 0), (House.e[:, it] <= (-eset1 + House.u[it]))),
@@ -502,8 +501,12 @@ if __name__ == '__main__':
         return (d.reshape(d.shape[0]/resolution, resolution).sum(1)/resolution)
 
     Target_15 = resample(Target[1: it], 15)
-    HPTarget = resample(House.P_target[1: it], 15)
-    HPPower = resample(Power.HeatPumps[1: it], 15)
+    HPTarget = resample(House.P_target[1 : it] - House.P0[1 : it], 15)
+    HPPower = resample(Power.HeatPumps[1: it] - House.P0[1 : it], 15)
+
+    # Target_15 = np.mean(np.reshape(Target[1 : it], 15, size(Target[1 : it], 2)/15));
+    # HPTarget = np.mean(np.reshape(House.P_target[1 : it] - House.P0[1 : it], 15, size(Target(2:it), 2)/15));
+    # HPPower = np.mean(np.reshape(Power.HeatPumps[1 : it] - House.P0[1 : it], 15, size(Target(2:it), 2)/15));
 
     # Display the results
     plt.plot(Target_15, label='Target')
