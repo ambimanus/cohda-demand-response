@@ -15,33 +15,20 @@ from visualizations import Stats
 from simulator import Simulator
 
 
-if __name__ == '__main__':
-    sc_file = sys.argv[1]
-    basedir = os.path.dirname(sc_file)
+def run(seed, target, states, p_refuse, opt_w):
     setup_logger()
     ts = datetime.datetime.now().replace(microsecond=0).isoformat('_')
     INFO('Init %s' % ts)
 
-    INFO('Importing %s' % sc_file)
-    rnd, seed, target, sol_init, p_refuse, opt_w = None, None, None, {}, {}, {}
-    with open(sc_file, 'rb') as scf:
-        reader = csv.reader(scf, delimiter=',')
-        for row in reader:
-            if seed is None:
-                seed = int(row[0])
-                rnd = random.Random(seed)
-            elif target is None:
-                target = float(row[0])
-            else:
-                uid = int(row[0])
-                state = float(row[1])
-                p_refuse[uid] = float(row[2])
-                opt_w[uid] = map(float, row[3:])
-                # try to stay in previous state, if feasible
-                if state in opt_w[uid]:
-                    sol_init[uid] = state
-                else:
-                    sol_init[uid] = random.choice(opt_w[uid])
+    rnd = random.Random(seed)
+
+    # try to stay in previous state, if feasible
+    sol_init = {}
+    for uid, state in states.items():
+        if state in opt_w[uid]:
+            sol_init[uid] = state
+        else:
+            sol_init[uid] = rnd.choice(opt_w[uid])
 
     cfg = Configuration(target, sol_init, opt_w, rnd, seed=seed)
     Objective.calls = 0
@@ -80,6 +67,33 @@ if __name__ == '__main__':
         stats.eval(sim.current_time)
     stats.eval_final()
 
+    ts = datetime.datetime.now().replace(microsecond=0).isoformat('_')
+    INFO('End %s' % ts)
+
+    return cfg.agent_ids, stats.solution
+
+
+if __name__ == '__main__':
+    setup_logger()
+    sc_file = sys.argv[1]
+
+    INFO('Importing %s' % sc_file)
+    seed, target, states, p_refuse, opt_w = None, None, {}, {}, {}
+    with open(sc_file, 'rb') as scf:
+        reader = csv.reader(scf, delimiter=',')
+        for row in reader:
+            if seed is None:
+                seed = int(row[0])
+            elif target is None:
+                target = float(row[0])
+            else:
+                uid = int(row[0])
+                states[uid] = float(row[1])
+                p_refuse[uid] = float(row[2])
+                opt_w[uid] = map(float, row[3:])
+
+    agent_ids, solution = run(seed, target, states, p_refuse, opt_w)
+
     if len(sys.argv) > 2 and sys.argv[2] == '--noout':
         dfn = None
     else:
@@ -88,13 +102,10 @@ if __name__ == '__main__':
             WARNING('File already exists: %s' % dfn)
         with open(dfn, 'wb') as df:
             writer = csv.writer(df, delimiter=',')
-            for uid in cfg.agent_ids:
-                r = stats.solution[uid]
+            for uid in agent_ids:
+                r = solution[uid]
                 writer.writerow([uid, r])
         INFO('Result stored in %s' % dfn)
-
-    ts = datetime.datetime.now().replace(microsecond=0).isoformat('_')
-    INFO('End %s' % ts)
 
     # if LOG_LEVEL > logging.INFO and dfn is not None:
     #     print dfn
