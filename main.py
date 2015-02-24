@@ -421,6 +421,7 @@ if __name__ == '__main__':
     # electrical conversion efficiency).
     Wind = sio.loadmat('Wind.mat')
 
+
     # n = number of units. Comment from Adam:
     # In this scenario we used a population of responsive heat pumps as the
     # participating loads in the demand response scenario, as you stated above. We
@@ -431,11 +432,23 @@ if __name__ == '__main__':
     # it = number of simulation steps.
     it = 1441
 
+    scale = 2000 / n
+    # Feed-in is positive power, Load is negative power
+    w = Wind['Wind'][0] / scale
+    u = (UnresponsiveLoad['P_U'][0] * -1) / (5 * scale)
+    # Set target as negative residual load (scaled to match population size)
+    Target = -1 * (w  + u)
+
+    # plt.plot(w / scale, label='Wind')
+    # plt.plot(u / (5 * scale), label='Unresponsive Load')
+    # plt.plot(Target, label='Target')
+    # plt.legend()
+    # plt.show()
+    # sys.exit(0)
+
     # Initialize the data structures for the simulation.
     # (See the documentation of the respective function.)
     House, Omega, Gamma = InitHeat(n, it, Enviro)
-
-    Target = (Wind['Wind'][0] / (10 * (100 / n))) #- (UnresponsiveLoad['P_U'][0] / 100 * (100 / n))
 
     # Run the simulation with the COHDA optimizer.
     print 'COHDA'
@@ -451,41 +464,52 @@ if __name__ == '__main__':
     # plt.ion()
     fig = plt.figure()
 
-    ax0 = fig.add_subplot(211)
-    # plt.setp(ax0.spines.values(), color='k')
-    # plt.setp([ax0.get_xticklines(), ax0.get_yticklines()], color='k')
-    ax0.set_xlabel('simulation horizon [15 minute intervals]')
-    ax0.set_ylabel('P$_{\\mathrm{el}}$ [kW]')
-    ax0.plot(resample(Target[1 : it], res), label='Target', lw=1.0)
-    # ax0.plot(resample(House.P_target[1 : it], res), label='P-target')
-    # ax0.plot(resample(House.P0[1 : it], res), label='P0')
-    # ax0.plot(resample(House.P_r[:, 1 : it].sum(0), res), label='P-r')
-    # ax0.plot(resample(House.Pmin[1 : it] - House.P0[1 : it], res), label='Pmin - P0', ls=':')
-    # ax0.plot(resample(House.Pmax[1 : it] - House.P0[1 : it], res), label='Pmax - P0', ls=':')
-    ax0.fill_between(np.arange((it - 1) // res),
+    ax = fig.add_subplot(311)
+    ax.set_ylabel('P$_{\\mathrm{el}}$ [kW]')
+    ax.plot(resample(w[1 : it], res), label='Wind', lw=0.5)
+    ax.plot(resample(u[1 : it], res), label='Unresponsive Load', lw=0.5)
+    ax.plot(resample(Target[1 : it], res), label='Target', lw=1.0)
+    # ax.plot(resample(House.P_target[1 : it], res), label='P-target')
+    # ax.plot(resample(House.P0[1 : it], res), label='P0')
+    # ax.plot(resample(House.P_r[:, 1 : it].sum(0), res), label='P-r')
+    # ax.plot(resample(House.Pmin[1 : it] - House.P0[1 : it], res), label='Pmin - P0', ls=':')
+    # ax.plot(resample(House.Pmax[1 : it] - House.P0[1 : it], res), label='Pmax - P0', ls=':')
+    ax.fill_between(np.arange((it - 1) // res),
                      resample(House.Pmin[1 : it] - House.P0[1 : it], res),
                      resample(House.Pmax[1 : it] - House.P0[1 : it], res),
                      color=(0.5, 0.5, 0.5, 0.25), lw=0.0)
     fill_proxy = Rectangle((0, 0), 1, 1, fc=(0.5, 0.5, 0.5, 0.25), ec='w', lw=0.0)
-    ax0.plot(resample(House.P_r[:, 1 : it].sum(0) - House.P0[1 : it], res), label='P-r - P0', color='k')
-    # ax0.plot(House.T_a[:, 1 : it].sum(0), label='T-a')
-    # ax0.plot(House.T_b[:, 1 : it].sum(0), label='T-b')
-    # ax0.plot(Enviro['air'][0][0][0], label='Enviro-air')
+    ax.plot(resample(House.P_r[:, 1 : it].sum(0) - House.P0[1 : it], res),
+                     label='Heat Pump Power Dispatched', color='k')
+    # ax.plot(Enviro['air'][0][0][0], label='Enviro-air')
+    lhl = ax.get_legend_handles_labels()
+    ax.legend(lhl[0] + [fill_proxy], lhl[1] + ['Flexibility'], loc='upper left')
+
+    ax = fig.add_subplot(312, sharex=ax)
+    # plt.setp(ax.spines.values(), color='k')
+    # plt.setp([ax.get_xticklines(), ax.get_yticklines()], color='k')
+    ax.set_ylabel('P$_{\\mathrm{el}}$ [kW]')
+    ax.plot(resample(House.P_r[:, 1 : it].sum(0) - House.P0[1 : it] - Target[1 : it], res),
+                     label='Residual Load', color='k')
+    ax.fill_between(np.arange((it - 1) // res),
+                     resample(House.Pmin[1 : it] - House.P0[1 : it] - Target[1 : it], res),
+                     resample(House.Pmax[1 : it] - House.P0[1 : it] - Target[1 : it], res),
+                     color=(0.5, 0.5, 0.5, 0.25), lw=0.0)
 
     # import pdb
     # pdb.set_trace()
-    lhl = ax0.get_legend_handles_labels()
-    ax0.legend(lhl[0] + [fill_proxy], lhl[1] + ['Flexibility'], loc='upper left')
+    lhl = ax.get_legend_handles_labels()
+    ax.legend(lhl[0] + [fill_proxy], lhl[1] + ['Flexibility'], loc='upper left')
 
-    ax1 = fig.add_subplot(212, sharex=ax0)
-    # plt.setp(ax1.spines.values(), color='k')
-    # plt.setp([ax1.get_xticklines(), ax1.get_yticklines()], color='k')
-    ax1.set_xlabel('simulation horizon [15 minute intervals]')
-    ax1.set_ylabel('T$_{\\mathrm{air}}$ [\\textdegree{}C]')
-    ax1.set_ylim(18.9, 21.1)
-    # ax1.axhspan(19.75, 20.25, fc=(0.5, 0.5, 0.5, 0.2), ec=(1, 1, 1, 0))
+    ax = fig.add_subplot(313, sharex=ax)
+    # plt.setp(ax.spines.values(), color='k')
+    # plt.setp([ax.get_xticklines(), ax.get_yticklines()], color='k')
+    ax.set_xlabel('simulation horizon [15 minute intervals]')
+    ax.set_ylabel('T$_{\\mathrm{air}}$ [\\textdegree{}C]')
+    ax.set_ylim(18.9, 21.1)
+    # ax.axhspan(19.75, 20.25, fc=(0.5, 0.5, 0.5, 0.2), ec=(1, 1, 1, 0))
     for ts in House.T_a[:, 1 : it]:
-        ax1.plot(resample(ts, res), color=(0.5, 0.5, 0.5, 0.25))
+        ax.plot(resample(ts, res), color=(0.5, 0.5, 0.5, 0.25))
 
     plt.show()
 

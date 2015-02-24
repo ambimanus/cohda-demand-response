@@ -30,7 +30,8 @@ def run(seed, target, states, p_refuse, opt_w):
         else:
             sol_init[uid] = rnd.choice(opt_w[uid])
 
-    cfg = Configuration(target, sol_init, opt_w, rnd, seed=seed)
+    cfg = Configuration(target, sol_init, opt_w, rnd, seed=seed,
+                        min_solution_distance=0.01)
     Objective.calls = 0
     Objective.instance = 0
 

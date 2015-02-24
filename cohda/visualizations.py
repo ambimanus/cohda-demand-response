@@ -23,6 +23,7 @@ class Stats(object):
         self.eq = None
         self.bkc_sel = None
         self.bkc_history = {}
+        self.full_bkc_ratings = {}
 
         for aid in self.cfg.agent_ids:
             self.solution[aid] = self.cfg.sol_init[aid]
@@ -42,6 +43,8 @@ class Stats(object):
                 self.bkc_sizes[aid] = len(a.bkc)
             if a.bkc_f is not None:
                 self.bkc_ratings[aid] = a.bkc_f
+            if a.bkc_f is not None and len(a.bkc) == self.cfg.opt_m:
+                self.full_bkc_ratings[aid] = a.bkc_f
 
         # sel := keys of bkc values that should be considered.
         # At the beginning of the simulation, report all bkc values.
@@ -137,22 +140,39 @@ class Stats(object):
         # FIXME: This would stop the process in an unconverged state, so a
         #        post-processing step would be necessary to settle the current
         #        bkc in all agents.
-        # x = 10
-        # if (self.cfg.min_solution_gradient is not None and
-        #         self.bkc_history is not None and
-        #         len(self.bkc_history) > x and
-        #         current_time in self.bkc_history):
-        #     grad = 0
-        #     obj = self.cfg.objective
-        #     keys = sorted(self.bkc_history.keys())
-        #     for i in range(x, 0, -1):
-        #         s_pre = self.bkc_history[keys[-(i + 1)]]
-        #         s_post = self.bkc_history[keys[-i]]
-        #         grad += abs(s_pre - s_post)
-        #     grad /= x
-        #     if grad < self.cfg.min_solution_gradient:
-        #         INFO('Stopping (min solution gradient reached)')
-        #         return False
+        x = 10
+        if (self.cfg.min_solution_gradient is not None and
+                self.bkcmin_size >= 1.0 and
+                self.bkc_history is not None and
+                len(self.bkc_history) > x and
+                current_time in self.bkc_history):
+            grad = 0
+            keys = sorted(self.bkc_history.keys())
+            for i in range(x, 0, -1):
+                s_pre = self.bkc_history[keys[-(i + 1)]]
+                s_post = self.bkc_history[keys[-i]]
+                grad += abs(s_pre - s_post)
+            grad /= x
+            if grad < self.cfg.min_solution_gradient:
+                INFO('Stopping (min solution gradient reached)')
+                # Search final bkc
+                aid_m = min(self.full_bkc_ratings.iterkeys(),
+                            key=(lambda key: self.bkc_ratings[key]))
+                self.solution = self.agents[aid_m].bkc
+                return False
+        # Check minimum solution distance criterion
+        # FIXME: This would stop the process in an unconverged state, so a
+        #        post-processing step would be necessary to settle the current
+        #        bkc in all agents.
+        if (self.cfg.min_solution_distance is not None and
+                self.bkcmin_size >= 1.0 and
+                self.bkcmin <= self.cfg.min_solution_distance):
+            INFO('Stopping (min solution distance reached)')
+            # Search final bkc
+            aid_m = min(self.full_bkc_ratings.iterkeys(),
+                        key=(lambda key: self.bkc_ratings[key]))
+            self.solution = self.agents[aid_m].bkc
+            return False
         # Check agent activity
         for a in self.agents.values():
             if a.dirty:
