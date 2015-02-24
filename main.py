@@ -1,4 +1,4 @@
-# coding = utf8
+# coding=utf8
 
 from __future__ import division
 
@@ -9,6 +9,7 @@ import numpy as np
 import scipy as sp
 import scipy.io as sio
 import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
 
 from cohda import uvic as cohda
 from cohda import util
@@ -304,28 +305,50 @@ def OptimizerCOHDA(House, Target, it):
 
     # House.e[:, it + 1] = House.T_a[:, it + 1] - House.T_set   # already set outside this function
     eset1 = House.delta / 2
+
+    # From Parkinson et al., "Comfort-constrained distributed heat pump management":
+    # Accurately scheduling the heat pump load in real-time
+    # will initially require determination of the control signal
+    # (set-point change) corresponding to the objective. To
+    # prevent customer-side disruption, set-point modulations are
+    # constrained to remain within the quarter-deadband width, as
+    # it is unlikely individuals will notice changes of this
+    # magnitude at end-use.
+    # |u(k)| ≤ δ/4
+    # Constraining set-point changes to this magnitude provides
+    # further benefits, as it will only involve loads traversing the
+    # final quarter-trajectory of their current operating state,
+    # thereby preventing rapid-cycling.
     u = House.delta / 4     # Eq 3.22
 
-    # Max Power ratings for each unit for COHDA
-    Pmax = (
-        np.logical_and(House.n[:, it + 1] == 0, House.e[:, it + 1] <= (-eset1 + u)) * House.P +
-        np.logical_and(House.n[:, it + 1] == 1, House.e[:, it + 1] <= eset1) * House.P
-    )
+    # Max Power ratings for each unit for COHDA:
+    # Collect devices that are *allowed* to be on
+    Pmax = np.logical_or(
+        # Devices that are off, but may be switched on
+        np.logical_and(House.n[:, it + 1] == 0, House.e[:, it + 1] <= (-eset1 + u)),
+        # Devices that are on, and are allowed to stay on
+        np.logical_and(House.n[:, it + 1] == 1, House.e[:, it + 1] <= (eset1 + u))
+    ) * House.P
     House.Pmax[it + 1] = np.sum(Pmax)
 
-    # Min Power ratings for each unit for COHDA
-    Pmin = (
-        np.logical_and(House.n[:, it + 1] == 0, House.e[:, it + 1] <= -eset1) * House.P +
-        np.logical_and(House.n[:, it + 1] == 1, House.e[:, it + 1] <= (eset1 - u)) * House.P
-    )
+    # Min Power ratings for each unit for COHDA:
+    # Collect devices that *must* be on
+    Pmin = np.logical_or(
+        # Devices that are off, but have to be switched on
+        np.logical_and(House.n[:, it + 1] == 0, House.e[:, it + 1] <= (-eset1 - u)),
+        # Devices that are on, and have to stay on
+        np.logical_and(House.n[:, it + 1] == 1, House.e[:, it + 1] <= (eset1 - u))
+    ) * House.P
     House.Pmin[it + 1] = np.sum(Pmin)
 
     # Uncontrolled responsive load trajectory (uncontrolled capacity factor P0)
     # u = 0                   # Eq 3.25
-    House.P0[it + 1] = np.sum(
-        np.logical_and(House.n[:, it + 1] == 0, House.e[:, it + 1] <= -eset1) * House.P +
-        np.logical_and(House.n[:, it + 1] == 1, House.e[:, it + 1] <= eset1) * House.P
-    )
+    House.P0[it + 1] = np.sum(np.logical_or(
+        # Devices that are off, but have to be switched on
+        np.logical_and(House.n[:, it + 1] == 0, House.e[:, it + 1] <= -eset1),
+        # Devices that are on, and are allowed to stay on
+        np.logical_and(House.n[:, it + 1] == 1, House.e[:, it + 1] <= eset1)
+    ) * House.P)
 
     # Target power output from responsive load community
     House.P_target[it + 1] = House.P0[it] + Target[it + 1]
@@ -384,7 +407,7 @@ if __name__ == '__main__':
     # system performance. This unresponsive load data is used by the 'Grid' module
     # to determine how much additional generation is required to satisfy community
     # loads with or without demand response.
-    # UnresponsiveLoad = sio.loadmat('UnresponsiveLoad.mat')
+    UnresponsiveLoad = sio.loadmat('UnresponsiveLoad.mat')
 
     # Wind.mat - Comment from Adam:
     # The Wind.mat data is wind generation from a wind turbine (I believe I used a
@@ -411,46 +434,58 @@ if __name__ == '__main__':
     # Initialize the data structures for the simulation.
     # (See the documentation of the respective function.)
     House, Omega, Gamma = InitHeat(n, it, Enviro)
-    # Power = InitPower(n, it)
-    # Attach the unresponsive load to the power structure manually.
-    # TODO: Make P_U a parameter for the InitPower() function?
-    # Power.P_U = UnresponsiveLoad['P_U']
 
-    Target = Wind['Wind'][0] / (10 * (100 / n))
+    Target = (Wind['Wind'][0] / (10 * (100 / n))) #- (UnresponsiveLoad['P_U'][0] / 100 * (100 / n))
 
     # Run the simulation with the COHDA optimizer.
     print 'COHDA'
     House = COHDA_Interface(House, Enviro, Target, Omega, Gamma)
 
-    # Resample the results to 15 minute resolution
+
+    # Resample the results to 15 minute resolution?
+    res = 15
     def resample(d, resolution):
         return d.reshape(d.shape[0]/resolution, resolution).sum(1) / resolution
 
-    res = 15
-    # Target = resample(Target[1 : it], res)
-    # HPTarget = resample(House.P_target[1 : it] - House.P0[1 : it], res)
-    # HPPower = resample(House.P_r[:, 1 : it].sum(0) - House.P0[1 : it], res)
-
-    # Target_15 = np.mean(np.reshape(Target[1 : it], 15, size(Target[1 : it], 2)/15));
-    # HPTarget = np.mean(np.reshape(House.P_target[1 : it] - House.P0[1 : it], 15, size(Target(2:it), 2)/15));
-    # HPPower = np.mean(np.reshape(House.P_r[:, 1 : it].sum(0) - House.P0[1 : it], 15, size(Target(2:it), 2)/15));
-
-    plt.ion()
     # Display the results
-    plt.plot(resample(Target[1 : it], res), label='Target')
-    # plt.plot(HPTarget, label='Heat Pump Corrected Target')
-    # plt.plot(HPPower, label='Heat Pump Power Dispatched')
-    # plt.plot(resample(House.P_target[1 : it], res), label='P-target')
-    # plt.plot(resample(House.P0[1 : it], res), label='P0')
-    # plt.plot(resample(House.P_r[:, 1 : it].sum(0), res), label='P-r')
-    plt.plot(resample(House.P_r[:, 1 : it].sum(0) - House.P0[1 : it], res), label='P-r - P0')
-    plt.plot(resample(House.Pmin[1 : it] - House.P0[1 : it], res), label='Pmin - P0', ls=':')
-    plt.plot(resample(House.Pmax[1 : it] - House.P0[1 : it], res), label='Pmax - P0', ls=':')
-    # plt.plot(House.T_a[:, 1 : it].sum(0), label='T-a')
-    # plt.plot(House.T_b[:, 1 : it].sum(0), label='T-b')
-    # plt.plot(Enviro['air'][0][0][0], label='Enviro-air')
-    plt.legend(loc='upper left')
+    # plt.ion()
+    fig = plt.figure()
+
+    ax0 = fig.add_subplot(211)
+    # plt.setp(ax0.spines.values(), color='k')
+    # plt.setp([ax0.get_xticklines(), ax0.get_yticklines()], color='k')
+    ax0.set_xlabel('simulation horizon [15 minute intervals]')
+    ax0.set_ylabel('P$_{\\mathrm{el}}$ [kW]')
+    ax0.plot(resample(Target[1 : it], res), label='Target', lw=1.0)
+    # ax0.plot(resample(House.P_target[1 : it], res), label='P-target')
+    # ax0.plot(resample(House.P0[1 : it], res), label='P0')
+    # ax0.plot(resample(House.P_r[:, 1 : it].sum(0), res), label='P-r')
+    # ax0.plot(resample(House.Pmin[1 : it] - House.P0[1 : it], res), label='Pmin - P0', ls=':')
+    # ax0.plot(resample(House.Pmax[1 : it] - House.P0[1 : it], res), label='Pmax - P0', ls=':')
+    ax0.fill_between(np.arange((it - 1) // res),
+                     resample(House.Pmin[1 : it] - House.P0[1 : it], res),
+                     resample(House.Pmax[1 : it] - House.P0[1 : it], res),
+                     color=(0.5, 0.5, 0.5, 0.25), lw=0.0)
+    fill_proxy = Rectangle((0, 0), 1, 1, fc=(0.5, 0.5, 0.5, 0.25), ec='w', lw=0.0)
+    ax0.plot(resample(House.P_r[:, 1 : it].sum(0) - House.P0[1 : it], res), label='P-r - P0', color='k')
+    # ax0.plot(House.T_a[:, 1 : it].sum(0), label='T-a')
+    # ax0.plot(House.T_b[:, 1 : it].sum(0), label='T-b')
+    # ax0.plot(Enviro['air'][0][0][0], label='Enviro-air')
+
+    # import pdb
+    # pdb.set_trace()
+    lhl = ax0.get_legend_handles_labels()
+    ax0.legend(lhl[0] + [fill_proxy], lhl[1] + ['Flexibility'], loc='upper left')
+
+    ax1 = fig.add_subplot(212, sharex=ax0)
+    # plt.setp(ax1.spines.values(), color='k')
+    # plt.setp([ax1.get_xticklines(), ax1.get_yticklines()], color='k')
+    ax1.set_xlabel('simulation horizon [15 minute intervals]')
+    ax1.set_ylabel('T$_{\\mathrm{air}}$ [\\textdegree{}C]')
+    ax1.set_ylim(18.9, 21.1)
+    # ax1.axhspan(19.75, 20.25, fc=(0.5, 0.5, 0.5, 0.2), ec=(1, 1, 1, 0))
+    for ts in House.T_a[:, 1 : it]:
+        ax1.plot(resample(ts, res), color=(0.5, 0.5, 0.5, 0.25))
+
     plt.show()
 
-    import pdb
-    pdb.set_trace()
