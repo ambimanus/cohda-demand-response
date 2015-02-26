@@ -343,15 +343,16 @@ def OptimizerCOHDA(House, Target, it):
 
     # Uncontrolled responsive load trajectory (uncontrolled capacity factor P0)
     # u = 0                   # Eq 3.25
-    House.P0[it + 1] = np.sum(np.logical_or(
-        # Devices that are off, but have to be switched on
-        np.logical_and(House.n[:, it + 1] == 0, House.e[:, it + 1] <= -eset1),
-        # Devices that are on, and are allowed to stay on
-        np.logical_and(House.n[:, it + 1] == 1, House.e[:, it + 1] <= eset1)
-    ) * House.P)
+    # House.P0[it + 1] = np.sum(np.logical_or(
+    #     # Devices that are off, but have to be switched on
+    #     np.logical_and(House.n[:, it + 1] == 0, House.e[:, it + 1] <= -eset1),
+    #     # Devices that are on, and are allowed to stay on
+    #     np.logical_and(House.n[:, it + 1] == 1, House.e[:, it + 1] <= eset1)
+    # ) * House.P)
 
     # Target power output from responsive load community
-    House.P_target[it + 1] = House.P0[it] + Target[it + 1]
+    # House.P_target[it + 1] = House.P0[it] + Target[it + 1]
+    House.P_target[it + 1] = Target[it + 1]
 
     # print new line every simulated hour
     hr = (it - 1) / 60 + 1
@@ -427,20 +428,27 @@ if __name__ == '__main__':
     # participating loads in the demand response scenario, as you stated above. We
     # used a population of 100 homes, mostly due to computer processing time, as
     # larger populations required significantly more time to run.
-    n = 100
+    n = 50
 
     # it = number of simulation steps.
     it = 1441
 
-    scale = 2000 / n
+    # scale_w = n / 2000
+    # scale_u = -5 * n / 2000
+    scale_w = 4 * n / 1500
+    scale_u = -1 * n / 1500
     # Feed-in is positive power, Load is negative power
-    w = Wind['Wind'][0] / scale
-    u = (UnresponsiveLoad['P_U'][0] * -1) / (5 * scale)
-    # Set target as negative residual load (scaled to match population size)
-    Target = -1 * (w  + u)
+    w = Wind['Wind'][0] * scale_w
+    u = UnresponsiveLoad['P_U'][0] * scale_u
+    Residual = w + u
+    # Set target as negative residual load
+    Target = -1 * Residual
+    # Set target as negative wind power
+    # Target = -1 * w
 
-    # plt.plot(w / scale, label='Wind')
-    # plt.plot(u / (5 * scale), label='Unresponsive Load')
+    # plt.plot(w, label='Wind')
+    # plt.plot(u, label='Unresponsive Load')
+    # plt.plot(Residual, label='Residual Load')
     # plt.plot(Target, label='Target')
     # plt.legend()
     # plt.show()
@@ -451,8 +459,9 @@ if __name__ == '__main__':
     House, Omega, Gamma = InitHeat(n, it, Enviro)
 
     # Run the simulation with the COHDA optimizer.
+    # The simulation interprets load as positive power, so scale by -1.
     print 'COHDA'
-    House = COHDA_Interface(House, Enviro, Target, Omega, Gamma)
+    House = COHDA_Interface(House, Enviro, -1 * Target, Omega, Gamma)
 
 
     # Resample the results to 15 minute resolution?
@@ -475,11 +484,11 @@ if __name__ == '__main__':
     # ax.plot(resample(House.Pmin[1 : it] - House.P0[1 : it], res), label='Pmin - P0', ls=':')
     # ax.plot(resample(House.Pmax[1 : it] - House.P0[1 : it], res), label='Pmax - P0', ls=':')
     ax.fill_between(np.arange((it - 1) // res),
-                     resample(House.Pmin[1 : it] - House.P0[1 : it], res),
-                     resample(House.Pmax[1 : it] - House.P0[1 : it], res),
+                    -1 * resample(House.Pmin[1 : it], res),
+                    -1 * resample(House.Pmax[1 : it], res),
                      color=(0.5, 0.5, 0.5, 0.25), lw=0.0)
     fill_proxy = Rectangle((0, 0), 1, 1, fc=(0.5, 0.5, 0.5, 0.25), ec='w', lw=0.0)
-    ax.plot(resample(House.P_r[:, 1 : it].sum(0) - House.P0[1 : it], res),
+    ax.plot(-1 * resample(House.P_r[:, 1 : it].sum(0), res),
                      label='Heat Pump Power Dispatched', color='k')
     # ax.plot(Enviro['air'][0][0][0], label='Enviro-air')
     lhl = ax.get_legend_handles_labels()
@@ -489,11 +498,11 @@ if __name__ == '__main__':
     # plt.setp(ax.spines.values(), color='k')
     # plt.setp([ax.get_xticklines(), ax.get_yticklines()], color='k')
     ax.set_ylabel('P$_{\\mathrm{el}}$ [kW]')
-    ax.plot(resample(House.P_r[:, 1 : it].sum(0) - House.P0[1 : it] - Target[1 : it], res),
+    ax.plot(-1 * resample(House.P_r[:, 1 : it].sum(0) + Target[1 : it], res),
                      label='Residual Load', color='k')
     ax.fill_between(np.arange((it - 1) // res),
-                     resample(House.Pmin[1 : it] - House.P0[1 : it] - Target[1 : it], res),
-                     resample(House.Pmax[1 : it] - House.P0[1 : it] - Target[1 : it], res),
+                    -1 * resample(House.Pmin[1 : it] + Target[1 : it], res),
+                    -1 * resample(House.Pmax[1 : it] + Target[1 : it], res),
                      color=(0.5, 0.5, 0.5, 0.25), lw=0.0)
 
     # import pdb
