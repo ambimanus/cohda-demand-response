@@ -55,8 +55,9 @@ class Agent():
     def notify_peers(self):
         # AGENTV(self.aid, 'notifying peers')
         for k in sorted(self.peers.keys()):
-            self.peers[k].update(self.aid, self.objective, self.gossip_updates,
-                                 self.bkc, self.bkc_creator)
+            self.peers[k].update(self.aid, self.objective,
+                                 dict(self.gossip_updates),
+                                 dict(self.bkc), self.bkc_creator)
             MSG()
         # AGENTV(self.aid, 'Clearing gossip_updates')
         self.gossip_updates.clear()

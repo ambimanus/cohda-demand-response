@@ -43,8 +43,11 @@ class Stats(object):
                 self.bkc_sizes[aid] = len(a.bkc)
             if a.bkc_f is not None:
                 self.bkc_ratings[aid] = a.bkc_f
-            if a.bkc_f is not None and len(a.bkc) == self.cfg.opt_m:
-                self.full_bkc_ratings[aid] = a.bkc_f
+                if len(a.bkc) == self.cfg.opt_m:
+                    self.full_bkc_ratings[aid] = a.bkc_f
+                else:
+                    # Sanity check. This must not happen.
+                    assert aid not in self.full_bkc_ratings
 
         # sel := keys of bkc values that should be considered.
         # At the beginning of the simulation, report all bkc values.
@@ -136,6 +139,10 @@ class Stats(object):
                 current_time >= self.cfg.max_simulation_steps):
             INFO('Stopping (max simulation steps reached)')
             return False
+        # Search final bkc
+        aid_m = None if len(self.full_bkc_ratings) == 0 else min(
+                self.full_bkc_ratings.iterkeys(),
+                key=(lambda key: self.bkc_ratings[key]))
         # Check mean bkc improvement over last x solutions
         # FIXME: This would stop the process in an unconverged state, so a
         #        post-processing step would be necessary to settle the current
@@ -153,11 +160,8 @@ class Stats(object):
                 s_post = self.bkc_history[keys[-i]]
                 grad += abs(s_pre - s_post)
             grad /= x
-            if grad < self.cfg.min_solution_gradient:
+            if grad < self.cfg.min_solution_gradient and aid_m is not None:
                 INFO('Stopping (min solution gradient reached)')
-                # Search final bkc
-                aid_m = min(self.full_bkc_ratings.iterkeys(),
-                            key=(lambda key: self.bkc_ratings[key]))
                 self.solution = self.agents[aid_m].bkc
                 return False
         # Check minimum solution distance criterion
@@ -166,11 +170,9 @@ class Stats(object):
         #        bkc in all agents.
         if (self.cfg.min_solution_distance is not None and
                 self.bkcmin_size >= 1.0 and
-                self.bkcmin <= self.cfg.min_solution_distance):
+                self.bkcmin <= self.cfg.min_solution_distance and
+                aid_m is not None):
             INFO('Stopping (min solution distance reached)')
-            # Search final bkc
-            aid_m = min(self.full_bkc_ratings.iterkeys(),
-                        key=(lambda key: self.bkc_ratings[key]))
             self.solution = self.agents[aid_m].bkc
             return False
         # Check agent activity
