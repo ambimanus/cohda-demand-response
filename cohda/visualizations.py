@@ -2,6 +2,7 @@
 
 from __future__ import division
 
+import logger
 from logger import *
 import util
 
@@ -24,6 +25,8 @@ class Stats(object):
         self.bkc_sel = None
         self.bkc_history = {}
         self.full_bkc_ratings = {}
+        self.switches = 0
+        self.message_counter = 0
 
         for aid in self.cfg.agent_ids:
             self.solution[aid] = self.cfg.sol_init[aid]
@@ -197,12 +200,13 @@ class Stats(object):
         if not self.is_converged():
             ERROR('convergence not reached!')
         sol = sum(self.solution.values())
-        switches = 0
         for aid in sorted(self.agents.keys()):
             if self.cfg.sol_init[aid] != self.solution[aid]:
-                switches += 1
+                self.switches += 1
+        self.message_counter = logger.message_counter
         INFO('Target: %.2f' % self.cfg.objective.target)
         INFO('Result: %.2f' % sol)
         INFO('Abs. Distance: %.2f' % self.cfg.objective(sol, record_call=False))
         INFO('Number of switched states: %d out of %d (%d%%)' % (
-                switches, len(self.agents), switches * 100 / len(self.agents)))
+                self.switches, len(self.agents),
+                self.switches * 100 / len(self.agents)))

@@ -31,7 +31,7 @@ def run(seed, target, states, p_refuse, opt_w):
             sol_init[uid] = rnd.choice(opt_w[uid])
 
     cfg = Configuration(target, sol_init, opt_w, rnd, seed=seed,
-                        min_solution_distance=0.01)
+                        min_solution_distance=0.05, network_phi=2.0)
     Objective.calls = 0
     Objective.instance = 0
 
@@ -71,7 +71,7 @@ def run(seed, target, states, p_refuse, opt_w):
     ts = datetime.datetime.now().replace(microsecond=0).isoformat('_')
     INFO('End %s' % ts)
 
-    return cfg.agent_ids, stats.solution
+    return stats
 
 
 if __name__ == '__main__':
@@ -93,7 +93,7 @@ if __name__ == '__main__':
                 p_refuse[uid] = float(row[2])
                 opt_w[uid] = map(float, row[3:])
 
-    agent_ids, solution = run(seed, target, states, p_refuse, opt_w)
+    stats = run(seed, target, states, p_refuse, opt_w)
 
     if len(sys.argv) > 2 and sys.argv[2] == '--noout':
         dfn = None
@@ -103,8 +103,8 @@ if __name__ == '__main__':
             WARNING('File already exists: %s' % dfn)
         with open(dfn, 'wb') as df:
             writer = csv.writer(df, delimiter=',')
-            for uid in agent_ids:
-                r = solution[uid]
+            for uid in sorted(stats.solution.keys()):
+                r = stats.solution[uid]
                 writer.writerow([uid, r])
         INFO('Result stored in %s' % dfn)
 

@@ -11,6 +11,7 @@ import scipy.io as sio
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 
+import stats
 from cohda import uvic as cohda
 from cohda import util
 
@@ -26,7 +27,7 @@ class DotDict(dict):
     __delattr__= dict.__delitem__
 
 
-def InitHeat(n, it, Enviro):
+def InitHeat(n, it, temperature):
     # Initializes Heat structure with thermodynamic parameters. Simulates full
     # period of operation to ensure load diversity for first time step
     # temperature and device states.
@@ -62,6 +63,8 @@ def InitHeat(n, it, Enviro):
     House.Pmax = np.zeros(it)
     House.P_target = np.zeros(it)
 
+    House.message_counter = np.zeros(it)
+
 
     # Load specific structure elements
     House.T_a = np.zeros((n, it))       # indoor air temperature
@@ -95,10 +98,10 @@ def InitHeat(n, it, Enviro):
     Omega, Gamma = HeatPumpMatrixCalc(House)
 
     # Do some simulation steps to initialize sane values for T_a and T_b
-    k = max(Enviro['air'][0][0][0].shape) #// 2
+    k = max(temperature.shape) #// 2
     progress = util.PBar(k * n).start()
     for i in range(k - 1):
-        HeatPumpInit(House_init, Enviro, i, progress, Omega, Gamma)
+        HeatPumpInit(House_init, temperature, i, progress, Omega, Gamma)
     progress.finish()
     print
     House.T_a[:, 0] = House_init.T_a[:, k - 1]
@@ -106,8 +109,10 @@ def InitHeat(n, it, Enviro):
     House.e[:, 0] = House_init.e[:, k - 1]
     House.n[:, 0] = House_init.n[:, k - 1]
 
+    House_uncontrolled = DotDict(other=House)
+
     # return House_init, Omega, Gamma
-    return House, Omega, Gamma
+    return House, Omega, Gamma, House_uncontrolled
 
 
 def HeatPumpSizing(House):
@@ -130,7 +135,7 @@ def HeatPumpSizing(House):
         House.P[i] = House.P_h[i] + House.q_fan[i]                                      # Eq 4.11
 
 
-def HeatPumpInit(House, Enviro, it, progress, Omega, Gamma):
+def HeatPumpInit(House, temperature, it, progress, Omega, Gamma):
     eset = House.delta / 2
 
     House.e[:, it] = House.T_a[:, it] - House.T_set
@@ -146,7 +151,7 @@ def HeatPumpInit(House, Enviro, it, progress, Omega, Gamma):
         q_dot = House.n[n, it] * (q_h + House.q_fan[n])       # heat provided by heatpump + fan, Eq 4.10
         House.P_r[n, it] = House.n[n, it] * House.P[n]       # Eq 4.11
         U = np.zeros(2)
-        U[0] = Enviro['air'][0][0][0][it]                            # Eq 4.2
+        U[0] = temperature[it]                            # Eq 4.2
         U[1] = q_dot                                     # Eq 4.2
         theta = np.array([House.T_a[n, it], House.T_b[n, it]])  # Eq 4.2
         # e = np.std(temp)
@@ -185,7 +190,7 @@ def HeatPumpMatrixCalc(House):
     return Omega, Gamma
 
 
-def COHDA_Interface(House, Enviro, Target, Omega, Gamma):
+def COHDA_Interface(House, temperature, Target, Omega, Gamma, relative=False):
     # This program will run a full simulation based on the number of time steps
     # in the Enviro.air (Outdoor air temperature) data series. Wind power
     # generation is provided for the duration of the simulation in the Wind
@@ -226,7 +231,7 @@ def COHDA_Interface(House, Enviro, Target, Omega, Gamma):
     #        Power - structure with simulation results for agglomerated power
 
     eset1 = House.delta / 2
-    k = max(Enviro['air'][0][0][0].shape)
+    k = max(temperature.shape)
 
     # Check target for it=0, assign u for it=0
     House.e[:, 0] = House.T_a[:, 0] - House.T_set
@@ -235,15 +240,15 @@ def COHDA_Interface(House, Enviro, Target, Omega, Gamma):
         np.logical_and(House.n[:, 0] == 1, House.e[:, 0] <= eset1)
     )
 
-    for it in range(k - 1):
+    for it in range(k):
         # House.n[:, it] = np.logical_or(
         #     np.logical_and(House.n[:, it] == 0, House.e[:, it] <= -eset1),
         #     np.logical_and(House.n[:, it] == 1, House.e[:, it] <= eset1)
         # )
-        House = HeatPump(House, Enviro, it, Omega, Gamma)
+        House = HeatPump(House, temperature, it, Omega, Gamma)
         House.e[:, it + 1] = House.T_a[:, it + 1] - House.T_set
         # Define target for total power - running average.
-        House, Pmin, Pmax = OptimizerCOHDA(House, Target, it)
+        House, Pmin, Pmax = OptimizerCOHDA(House, Target, it, relative=relative)
 
         Prob = np.zeros(House.N) #((min(max(House.e[:, it], -1), 1)) + 1) / 2
         # Prob = np.logical_or(
@@ -255,16 +260,20 @@ def COHDA_Interface(House, Enviro, Target, Omega, Gamma):
         target = House.P_target[it + 1]
         states = {uid: House.n[uid, it] * House.P[uid] for uid in range(House.N)} # Current Power of unit
         opt_w = {uid: map(float, [Pmin[uid], Pmax[uid]]) for uid in range(House.N)}
-        uid, Pnew = cohda.run(seed, target, states, Prob, opt_w)
+        stats = cohda.run(seed, target, states, Prob, opt_w)
 
-        House.n[:, it + 1] = np.array(Pnew.values()) / House.P
+        House.n[:, it + 1] = np.array(stats.solution.values()) / House.P
+        House.message_counter[it + 1] = stats.message_counter
+
+    # Simulate last time step
+    House = HeatPump(House, temperature, k, Omega, Gamma)
 
     print
 
     return House
 
 
-def HeatPump(House, Enviro, it, Omega, Gamma):
+def HeatPump(House, temperature, it, Omega, Gamma, progress=None):
     # Equivalent thermodynamic parameter model for houses using air source heat
     # pumps. Considers both building air temperature, and building mass
     # temperature for more accurate thermal modeling. Error term, e() accounts
@@ -275,25 +284,71 @@ def HeatPump(House, Enviro, it, Omega, Gamma):
         q_h = eff * House.P_h[n]                           # heat provided by heatpump, Eq 4.9
         q_dot = House.n[n, it] * (q_h + House.q_fan[n])       # heat provided by heatpump + fan, Eq 4.10
         House.P_r[n, it] = House.n[n, it] * House.P[n]       # Eq 4.11
-        U = np.zeros(2)
-        U[0] = Enviro['air'][0][0][0][it]                            # Eq 4.2
-        U[1] = q_dot                                     # Eq 4.2
-        theta = np.array([House.T_a[n, it], House.T_b[n, it]])  # Eq 4.2
-        # e = np.std(temp)
-        # e = np.random.normal(0, 0.1, (1, 2))
 
-        theta_next = np.dot(Omega[n], theta) + np.dot(Gamma[n], U) # +e    # Eq 4.4
-        House.T_a[n, it + 1] = theta_next[0]
-        House.T_b[n, it + 1] = theta_next[1]
+        if it < House.P_r.shape[-1] - 1:
+            U = np.zeros(2)
+            U[0] = temperature[it]                            # Eq 4.2
+            U[1] = q_dot                                     # Eq 4.2
+            theta = np.array([House.T_a[n, it], House.T_b[n, it]])  # Eq 4.2
+            # e = np.std(temp)
+            # e = np.random.normal(0, 0.1, (1, 2))
+
+            theta_next = np.dot(Omega[n], theta) + np.dot(Gamma[n], U) # +e    # Eq 4.4
+            House.T_a[n, it + 1] = theta_next[0]
+            House.T_b[n, it + 1] = theta_next[1]
+
+        if progress is not None:
+            progress.update()
 
     # Initially set the next time steps heat pump state based on persistence
     # model. The controller can override these settings to achieve it's target
-    House.n[:, it + 1] = House.n[:, it]
+    if it < House.P_r.shape[-1] - 1:
+        House.n[:, it + 1] = House.n[:, it]
 
     return House
 
 
-def OptimizerCOHDA(House, Target, it):
+def HeatPump_uncontrolled(House, temperature, it, Omega, Gamma, progress=None):
+    # Equivalent thermodynamic parameter model for houses using air source heat
+    # pumps. Considers both building air temperature, and building mass
+    # temperature for more accurate thermal modeling. Error term, e() accounts
+    # for solar radiation and other random thermal effects (currently disabled).
+
+    for n in range(House.N):
+        eff = np.polyval(House.COP_curve, House.T_a[n, it])   # heat pump efficiency, based on curve
+        q_h = eff * House.P_h[n]                           # heat provided by heatpump, Eq 4.9
+        q_dot = House.n[n, it] * (q_h + House.q_fan[n])       # heat provided by heatpump + fan, Eq 4.10
+        House.P_r[n, it] = House.n[n, it] * House.P[n]       # Eq 4.11
+
+        if it < House.P_r.shape[-1] - 1:
+            U = np.zeros(2)
+            U[0] = temperature[it]                            # Eq 4.2
+            U[1] = q_dot                                     # Eq 4.2
+            theta = np.array([House.T_a[n, it], House.T_b[n, it]])  # Eq 4.2
+            # e = np.std(temp)
+            # e = np.random.normal(0, 0.1, (1, 2))
+
+            theta_next = np.dot(Omega[n], theta) + np.dot(Gamma[n], U) # +e    # Eq 4.4
+            House.T_a[n, it + 1] = theta_next[0]
+            House.T_b[n, it + 1] = theta_next[1]
+
+        if progress is not None:
+            progress.update()
+
+    if it < House.P_r.shape[-1] - 1:
+        House.e[:, it + 1] = House.T_a[:, it + 1] - House.T_set
+        eset1 = House.delta / 2
+        House.n[:, it + 1] = np.logical_or(
+            # Devices that are off, but have to be switched on
+            np.logical_and(House.n[:, it] == 0, House.e[:, it + 1] <= -eset1),
+            # Devices that are on, and are allowed to stay on
+            np.logical_and(House.n[:, it] == 1, House.e[:, it + 1] <= eset1)
+        )
+
+    return House
+
+
+def OptimizerCOHDA(House, Target, it, relative=False):
     # This function determines the possible states that each heat pump are
     # feasible given our user-defined temperature constraints - 1/2 the deadband
     # range. It also calculates a target power for the responsive load
@@ -352,24 +407,27 @@ def OptimizerCOHDA(House, Target, it):
 
     # Target power output from responsive load community
     # House.P_target[it + 1] = House.P0[it] + Target[it + 1]
-    House.P_target[it + 1] = Target[it + 1]
+    if relative:
+        House.P_target[it + 1] = House.P_r[:, it].sum(0) + Target[it + 1]
+    else:
+        House.P_target[it + 1] = Target[it + 1]
 
     # print new line every simulated hour
-    hr = (it - 1) / 60 + 1
-    if it == 1:
+    hr = it / 60 + 1
+    if it == 0:
         print 'Simulation progress, splitted by hour:'
         print '(< means target below feasible range, > means above, . is ok)'
         print ('%2d: ' % hr),
-    elif it % 60 == 1:
+    elif it % 60 == 0:
         print ('\n%2d: ' % hr),
 
     # Verify target is feasible, and modify if not.
-    if House.P_target[it + 1] < House.Pmin[it]:
+    if House.P_target[it + 1] < House.Pmin[it + 1]:
         print '<',
-        House.P_target[it + 1] = House.Pmin[it]
-    elif House.P_target[it + 1] > House.Pmax[it]:
+        House.P_target[it + 1] = House.Pmin[it + 1]
+    elif House.P_target[it + 1] > House.Pmax[it + 1]:
         print '>',
-        House.P_target[it + 1] = House.Pmax[it]
+        House.P_target[it + 1] = House.Pmax[it + 1]
     else:
         print '.', # simply to show that the program is progressing correctly.
 
@@ -397,7 +455,7 @@ if __name__ == '__main__':
     # simulations again with a specific dates temperature info, or you could
     # replace the file with any 1-minute resolution temperature data (*C) you have
     # available).
-    Enviro = sio.loadmat('Enviro.mat')['Enviro']
+    # Enviro = sio.loadmat('Enviro.mat')['Enviro']
 
     # UnresponsiveLoad.mat - Comment from Adam:
     # The Unresponsive_Load.mat data was provided by Simon Parkinson, and was based
@@ -420,35 +478,54 @@ if __name__ == '__main__':
     # using the attached script (Simple conversion of mechanical energy extracted
     # from wind by a turbine converted to electrical power via a gearbox and fixed
     # electrical conversion efficiency).
-    Wind = sio.loadmat('Wind.mat')
-
+    # Wind = sio.loadmat('Wind.mat')
 
     # n = number of units. Comment from Adam:
     # In this scenario we used a population of responsive heat pumps as the
     # participating loads in the demand response scenario, as you stated above. We
     # used a population of 100 homes, mostly due to computer processing time, as
     # larger populations required significantly more time to run.
-    n = 50
+    n = 20
 
     # it = number of simulation steps.
     it = 1441
 
     # scale_w = n / 2000
     # scale_u = -5 * n / 2000
-    scale_w = 4 * n / 1500
-    scale_u = -1 * n / 1500
+    scale_w = n / 1500
+    # scale_u = -1 * n / 1500
+
     # Feed-in is positive power, Load is negative power
-    w = Wind['Wind'][0] * scale_w
-    u = UnresponsiveLoad['P_U'][0] * scale_u
-    Residual = w + u
+
+    # Enviro
+    # http://www.nrel.gov/midc/nwtc_m2/
+    from WindGen import WindGen, import_M2
+    datetimes, temperature, windspeed, windpower = import_M2('z7165526.txt', it=it - 1)
+    # windspeed_2 = (windspeed + np.random.normal(windspeed.mean(), windspeed.std() / 5, len(windspeed))) / 1.6
+    # windpower_2 = WindGen(windspeed_2, it=it - 1)
+    # windpower = windpower + windpower_2
+
+    # w = Wind['Wind'][0] * scale_w
+    w = np.empty(it)
+    # w[1:] = np.load('M2_windspeed_80m_2014-04-01.npy') * scale_w
+    w[1:] = windpower * scale_w
+    w[0] = w[1]
+
+    # Target
+    # u = UnresponsiveLoad['P_U'][0] * scale_u
+    # Residual = w + u
     # Set target as negative residual load
-    Target = -1 * Residual
+    # Target = -1 * Residual
     # Set target as negative wind power
     # Target = -1 * w
+    # Set target as negative wind power fluctuation
+    Target = np.zeros(it)
+    # Target[1:] = -1 * (w[1:] - w[:-1])
+    Target[2:] = (-1 * (w[1:] - w[:-1]))[:-1]
 
     # plt.plot(w, label='Wind')
-    # plt.plot(u, label='Unresponsive Load')
-    # plt.plot(Residual, label='Residual Load')
+    # # plt.plot(u, label='Unresponsive Load')
+    # # plt.plot(Residual, label='Residual Load')
     # plt.plot(Target, label='Target')
     # plt.legend()
     # plt.show()
@@ -456,69 +533,119 @@ if __name__ == '__main__':
 
     # Initialize the data structures for the simulation.
     # (See the documentation of the respective function.)
-    House, Omega, Gamma = InitHeat(n, it, Enviro)
+    House, Omega, Gamma, House_uncontrolled = InitHeat(n, it, temperature)
+
+    # Run simulation for the uncontrolled reference case
+    print 'Simulate uncontrolled reference case'
+    k = max(temperature.shape) + 1
+    progress = util.PBar(k * n).start()
+    for i in range(k):
+        HeatPump_uncontrolled(House_uncontrolled, temperature, i, Omega, Gamma, progress=progress)
+    progress.finish()
+    print
 
     # Run the simulation with the COHDA optimizer.
     # The simulation interprets load as positive power, so scale by -1.
     print 'COHDA'
-    House = COHDA_Interface(House, Enviro, -1 * Target, Omega, Gamma)
+    House = COHDA_Interface(House, temperature, -1 * Target, Omega, Gamma, relative=True)
 
 
     # Resample the results to 15 minute resolution?
-    res = 15
+    res = 1
     def resample(d, resolution):
         return d.reshape(d.shape[0]/resolution, resolution).sum(1) / resolution
 
     # Display the results
-    # plt.ion()
     fig = plt.figure()
 
-    ax = fig.add_subplot(311)
+    # bias_P_r = House.P_r.sum(0)[0]
+    # bias_wind = w[0]
+    bias = House.P_r.sum(0)[0] - w[0]
+
+    follow = House.P_r.sum(0) - bias
+
+    target = np.zeros(it)
+    # no control actions in the first two intervals
+    target[:2] = House.P_r[:,:2].sum(0) - bias
+    target[2:] = House.P_target[2:] - bias
+
+    # f_pmin, f_pmax = np.zeros(it), np.zeros(it)
+    f_pmin = House.Pmin - bias
+    f_pmax = House.Pmax - bias
+
+
+    diff = np.zeros(it)
+    diff[1:] = np.array(follow - target + w)[:-1]
+    diff_pmin, diff_pmax = np.array(f_pmin), np.array(f_pmax)
+    diff_pmin[2:] = np.array(f_pmin - target + w)[1:-1]
+    diff_pmax[2:] = np.array(f_pmax - target + w)[1:-1]
+    # JAY!!!
+
+    ax = fig.add_subplot(411)
     ax.set_ylabel('P$_{\\mathrm{el}}$ [kW]')
     ax.plot(resample(w[1 : it], res), label='Wind', lw=0.5)
-    ax.plot(resample(u[1 : it], res), label='Unresponsive Load', lw=0.5)
-    ax.plot(resample(Target[1 : it], res), label='Target', lw=1.0)
-    # ax.plot(resample(House.P_target[1 : it], res), label='P-target')
-    # ax.plot(resample(House.P0[1 : it], res), label='P0')
-    # ax.plot(resample(House.P_r[:, 1 : it].sum(0), res), label='P-r')
-    # ax.plot(resample(House.Pmin[1 : it] - House.P0[1 : it], res), label='Pmin - P0', ls=':')
-    # ax.plot(resample(House.Pmax[1 : it] - House.P0[1 : it], res), label='Pmax - P0', ls=':')
     ax.fill_between(np.arange((it - 1) // res),
-                    -1 * resample(House.Pmin[1 : it], res),
-                    -1 * resample(House.Pmax[1 : it], res),
+                    resample(diff_pmin[1: it], res),
+                    resample(diff_pmax[1: it], res),
                      color=(0.5, 0.5, 0.5, 0.25), lw=0.0)
+    # ax.plot(resample(f_pmin[1 : it], res), label='pmin')
+    # ax.plot(resample(f_pmax[1 : it], res), label='pmax')
     fill_proxy = Rectangle((0, 0), 1, 1, fc=(0.5, 0.5, 0.5, 0.25), ec='w', lw=0.0)
-    ax.plot(-1 * resample(House.P_r[:, 1 : it].sum(0), res),
-                     label='Heat Pump Power Dispatched', color='k')
-    # ax.plot(Enviro['air'][0][0][0], label='Enviro-air')
+    ax.plot(resample(diff[1 : it], res), label='Heat Pump Power Dispatched', color='k')
     lhl = ax.get_legend_handles_labels()
-    ax.legend(lhl[0] + [fill_proxy], lhl[1] + ['Flexibility'], loc='upper left')
+    ax.legend(lhl[0] + [fill_proxy], lhl[1] + ['Flexibility'])
 
-    ax = fig.add_subplot(312, sharex=ax)
+
+    ax = fig.add_subplot(412, sharex=ax)
     # plt.setp(ax.spines.values(), color='k')
     # plt.setp([ax.get_xticklines(), ax.get_yticklines()], color='k')
     ax.set_ylabel('P$_{\\mathrm{el}}$ [kW]')
-    ax.plot(-1 * resample(House.P_r[:, 1 : it].sum(0) + Target[1 : it], res),
-                     label='Residual Load', color='k')
-    ax.fill_between(np.arange((it - 1) // res),
-                    -1 * resample(House.Pmin[1 : it] + Target[1 : it], res),
-                    -1 * resample(House.Pmax[1 : it] + Target[1 : it], res),
-                     color=(0.5, 0.5, 0.5, 0.25), lw=0.0)
+    # ax.plot(resample((diff - w)[1 : it], res), label='Error', color='k')
+    # ax.fill_between(np.arange((it - 1) // res),
+    #                 -1 * resample(House.Pmin[1 : it] + Target[1 : it], res),
+    #                 -1 * resample(House.Pmax[1 : it] + Target[1 : it], res),
+    #                  color=(0.5, 0.5, 0.5, 0.25), lw=0.0)
+    ax.plot(resample(w - House_uncontrolled.P_r.sum(0), res), label='reference')
+    ax.plot(resample(w - House.P_r.sum(0), res), label='controlled')
 
-    # import pdb
-    # pdb.set_trace()
-    lhl = ax.get_legend_handles_labels()
-    ax.legend(lhl[0] + [fill_proxy], lhl[1] + ['Flexibility'], loc='upper left')
+    # lhl = ax.get_legend_handles_labels()
+    # ax.legend(lhl[0] + [fill_proxy], lhl[1] + ['Flexibility'], loc='upper left')
+    ax.legend()
 
-    ax = fig.add_subplot(313, sharex=ax)
+
+    ax = fig.add_subplot(413, sharex=ax)
     # plt.setp(ax.spines.values(), color='k')
     # plt.setp([ax.get_xticklines(), ax.get_yticklines()], color='k')
-    ax.set_xlabel('simulation horizon [15 minute intervals]')
-    ax.set_ylabel('T$_{\\mathrm{air}}$ [\\textdegree{}C]')
+    # ax.set_xlabel('simulation horizon [minutes]')
+    ax.set_ylabel('T$_{\\mathrm{air}}$ [\\textdegree{}C] (reference)')
+    ax.set_ylim(18.9, 21.1)
+    # ax.axhspan(19.75, 20.25, fc=(0.5, 0.5, 0.5, 0.2), ec=(1, 1, 1, 0))
+    for ts in House_uncontrolled.T_a[:, 1 : it]:
+        ax.plot(resample(ts, res), color=(0.5, 0.5, 0.5, 0.25))
+
+
+    ax = fig.add_subplot(414, sharex=ax)
+    # plt.setp(ax.spines.values(), color='k')
+    # plt.setp([ax.get_xticklines(), ax.get_yticklines()], color='k')
+    # ax.set_xlabel('simulation horizon [minutes]')
+    ax.set_ylabel('T$_{\\mathrm{air}}$ [\\textdegree{}C] (controlled)')
     ax.set_ylim(18.9, 21.1)
     # ax.axhspan(19.75, 20.25, fc=(0.5, 0.5, 0.5, 0.2), ec=(1, 1, 1, 0))
     for ts in House.T_a[:, 1 : it]:
         ax.plot(resample(ts, res), color=(0.5, 0.5, 0.5, 0.25))
 
-    plt.show()
 
+    # ax = fig.add_subplot(414, sharex=ax)
+    # # plt.setp(ax.spines.values(), color='k')
+    # # plt.setp([ax.get_xticklines(), ax.get_yticklines()], color='k')
+    # ax.set_xlabel('simulation horizon [minutes]')
+    # ax.set_ylabel('messages')
+    # # ax.set_ylim(18.9, 21.1)
+    # # ax.axhspan(19.75, 20.25, fc=(0.5, 0.5, 0.5, 0.2), ec=(1, 1, 1, 0))
+    # ax.plot(resample(House.message_counter[1 : it], res))
+
+    plt.ion()
+    plt.show()
+    import pdb
+    pdb.set_trace()
+    # plt.show()
