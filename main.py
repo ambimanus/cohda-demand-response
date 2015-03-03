@@ -3,7 +3,10 @@
 from __future__ import division
 
 import sys
+import os
 import copy
+import pickle
+import datetime
 
 import numpy as np
 import scipy as sp
@@ -436,7 +439,7 @@ def OptimizerCOHDA(House, Target, it, relative=False):
     return House, Pmin, Pmax
 
 
-if __name__ == '__main__':
+def main():
     # This is the main script for running the COHDA optimizer on a given set of
     # scenario data files (demand response program attempt to follow a wind
     # generation profile).
@@ -485,7 +488,7 @@ if __name__ == '__main__':
     # participating loads in the demand response scenario, as you stated above. We
     # used a population of 100 homes, mostly due to computer processing time, as
     # larger populations required significantly more time to run.
-    n = 20
+    n = 1500
 
     # it = number of simulation steps.
     it = 1441
@@ -550,6 +553,24 @@ if __name__ == '__main__':
     House = COHDA_Interface(House, temperature, -1 * Target, Omega, Gamma, relative=True)
 
 
+    # Store the results
+    ts = datetime.datetime.now().isoformat()
+    basepath = 'data'
+    fn1 = str(os.path.join(basepath, '.'.join(('House', ts, 'pickle'))))
+    fn2 = str(os.path.join(basepath, '.'.join(('House_uncontrolled', ts, 'pickle'))))
+    fn3 = str(os.path.join(basepath, '.'.join(('w', ts, 'npy'))))
+    with open(fn1, 'w') as f:
+        pickle.dump(dict(House), f)
+    with open(fn2, 'w') as f:
+        pickle.dump(dict(House_uncontrolled), f)
+    np.save(fn3, w)
+
+    return fn1, fn2, fn3
+
+
+def show(House, House_uncontrolled, w):
+    it = w.shape[-1]
+
     # Resample the results to 15 minute resolution?
     res = 1
     def resample(d, resolution):
@@ -583,7 +604,7 @@ if __name__ == '__main__':
 
     ax = fig.add_subplot(411)
     ax.set_ylabel('P$_{\\mathrm{el}}$ [kW]')
-    ax.plot(resample(w[1 : it], res), label='Wind', lw=0.5)
+    ax.plot(resample(w[1 : it], res), label='Wind Power', lw=0.5)
     ax.fill_between(np.arange((it - 1) // res),
                     resample(diff_pmin[1: it], res),
                     resample(diff_pmax[1: it], res),
@@ -593,7 +614,7 @@ if __name__ == '__main__':
     fill_proxy = Rectangle((0, 0), 1, 1, fc=(0.5, 0.5, 0.5, 0.25), ec='w', lw=0.0)
     ax.plot(resample(diff[1 : it], res), label='Heat Pump Power Dispatched', color='k')
     lhl = ax.get_legend_handles_labels()
-    ax.legend(lhl[0] + [fill_proxy], lhl[1] + ['Flexibility'])
+    ax.legend(lhl[0] + [fill_proxy], lhl[1] + ['Capacity'], framealpha=0.5)
 
 
     ax = fig.add_subplot(412, sharex=ax)
@@ -605,34 +626,34 @@ if __name__ == '__main__':
     #                 -1 * resample(House.Pmin[1 : it] + Target[1 : it], res),
     #                 -1 * resample(House.Pmax[1 : it] + Target[1 : it], res),
     #                  color=(0.5, 0.5, 0.5, 0.25), lw=0.0)
-    ax.plot(resample(w - House_uncontrolled.P_r.sum(0), res), label='reference')
-    ax.plot(resample(w - House.P_r.sum(0), res), label='controlled')
+    ax.plot(resample(w - House_uncontrolled.P_r.sum(0), res), label='resulting load (reference)')
+    ax.plot(resample(w - House.P_r.sum(0), res), label='resulting load (controlled)')
 
     # lhl = ax.get_legend_handles_labels()
     # ax.legend(lhl[0] + [fill_proxy], lhl[1] + ['Flexibility'], loc='upper left')
-    ax.legend()
+    ax.legend(framealpha=0.5)
 
 
     ax = fig.add_subplot(413, sharex=ax)
     # plt.setp(ax.spines.values(), color='k')
     # plt.setp([ax.get_xticklines(), ax.get_yticklines()], color='k')
     # ax.set_xlabel('simulation horizon [minutes]')
-    ax.set_ylabel('T$_{\\mathrm{air}}$ [\\textdegree{}C] (reference)')
+    ax.set_ylabel('T$_{\\mathrm{air}}^{\\mathrm{(reference)}}$ [\\textdegree{}C]')
     ax.set_ylim(18.9, 21.1)
     # ax.axhspan(19.75, 20.25, fc=(0.5, 0.5, 0.5, 0.2), ec=(1, 1, 1, 0))
     for ts in House_uncontrolled.T_a[:, 1 : it]:
-        ax.plot(resample(ts, res), color=(0.5, 0.5, 0.5, 0.25))
+        ax.plot(resample(ts, res), color=(0.5, 0.5, 0.5, 0.1))
 
 
     ax = fig.add_subplot(414, sharex=ax)
     # plt.setp(ax.spines.values(), color='k')
     # plt.setp([ax.get_xticklines(), ax.get_yticklines()], color='k')
     # ax.set_xlabel('simulation horizon [minutes]')
-    ax.set_ylabel('T$_{\\mathrm{air}}$ [\\textdegree{}C] (controlled)')
+    ax.set_ylabel('T$_{\\mathrm{air}}^{\\mathrm{(controlled)}}$ [\\textdegree{}C]')
     ax.set_ylim(18.9, 21.1)
     # ax.axhspan(19.75, 20.25, fc=(0.5, 0.5, 0.5, 0.2), ec=(1, 1, 1, 0))
     for ts in House.T_a[:, 1 : it]:
-        ax.plot(resample(ts, res), color=(0.5, 0.5, 0.5, 0.25))
+        ax.plot(resample(ts, res), color=(0.5, 0.5, 0.5, 0.1))
 
 
     # ax = fig.add_subplot(414, sharex=ax)
@@ -644,8 +665,18 @@ if __name__ == '__main__':
     # # ax.axhspan(19.75, 20.25, fc=(0.5, 0.5, 0.5, 0.2), ec=(1, 1, 1, 0))
     # ax.plot(resample(House.message_counter[1 : it], res))
 
-    plt.ion()
-    plt.show()
-    import pdb
-    pdb.set_trace()
+    # plt.ion()
     # plt.show()
+    # import pdb
+    # pdb.set_trace()
+    plt.show()
+
+
+if __name__ == '__main__':
+    fn1, fn2, fn3 = main()
+    with open(fn1) as f:
+        d1 = pickle.load(f)
+    with open(fn2) as f:
+        d2 = pickle.load(f)
+    d3 = np.load(fn3)
+    show(DotDict(other=d1), DotDict(other=d2), d3)
