@@ -37,6 +37,7 @@ class Agent():
         self.bkc = {}
         self.bkc_creator = self.aid
         self.bkc_f = None
+        self.bkc_keys = set()
 
     def step(self):
         if self.current_timeout <= 0:
@@ -54,10 +55,12 @@ class Agent():
 
     def notify_peers(self):
         # AGENTV(self.aid, 'notifying peers')
+        gu = dict(self.gossip_updates)
+        bkc = dict(self.bkc)
+        bkck = set(self.bkc_keys)
         for k in sorted(self.peers.keys()):
-            self.peers[k].update(self.aid, self.objective,
-                                 dict(self.gossip_updates),
-                                 dict(self.bkc), self.bkc_creator)
+            self.peers[k].update(self.aid, self.objective, gu, bkc,
+                                 self.bkc_creator, bkck, self.bkc_f)
             MSG()
         # AGENTV(self.aid, 'Clearing gossip_updates')
         self.gossip_updates.clear()
@@ -107,20 +110,8 @@ class Agent():
             return True
         return False
 
-    def update(self, aid, objective, gossip_updates, bkc, bkc_creator):
-        # Agent
-        if not aid in self.peers:
-            WARNING(self.aid, 'got update from unknown sender', aid)
-            # return
-        # AGENTV(self.aid, 'update() from', aid)
 
-        # Update objective
-        if (self.objective is None or
-                self.objective.instance < objective.instance):
-            self.notify(objective)
-
-        # AgentGossip
-        # AGENT(self.aid, 'receiving gossip_updates_inbox:', gossip_updates)
+    def update_gossip(self, gossip_updates):
         for k, v in gossip_updates.items():
             if (k != self.aid and
                     (k not in self.gossip_storage or
@@ -133,11 +124,10 @@ class Agent():
                 self.gossip_updates_inbox[k] = v
                 # Mark myself as dirty
                 self.dirty = True
-        # AGENT(self.aid, 'updated gossip_updates_inbox:',
-        #       self.gossip_updates_inbox)
 
-        # AgentGossipBKC
-        bkc_f = self.distance(None, sum(bkc.values()))
+
+    def update_bkc(self, aid, bkc, bkc_creator, bkc_keys, bkc_f):
+        # bkc_f = self.distance(None, sum(bkc.values()))
         # AGENTV(self.aid, 'from %s: f(bkc_%d)' % (aid, bkc_creator))
 
         # For bkc vs. self.bkc, there are different cases to consider:
@@ -156,7 +146,7 @@ class Agent():
         # 6) every other case
         #    (i.e.: self.bkc is larger and no new keys in given bkc)
         #       -> do nothing
-        set_own, set_other = set(self.bkc.keys()), set(bkc.keys())
+        set_own, set_other = self.bkc_keys, bkc_keys
         in_keys = set_other - set_own
         out_keys = set_own - set_other
         if bkc_creator == self.aid:
@@ -168,15 +158,17 @@ class Agent():
             if len(out_keys) == 0:
                 # Case 2: replace bkc
                 # AGENTV(self.aid, 'replacing BKC')
-                self.bkc = bkc
+                self.bkc = dict(bkc)
                 self.bkc_f = bkc_f
                 self.bkc_creator = bkc_creator
+                self.bkc_keys = set(self.bkc.keys())
             else:
                 # Case 3: merge bkc
                 # AGENTV(self.aid, 'keys are different, updating BKC')
                 # Add every newly discovered item in bkc to self.bkc
                 for k in in_keys:
                     self.bkc[k] = bkc[k]
+                    self.bkc_keys.add(k)
                 self.bkc_creator = self.aid
                 self.bkc_f = self.distance(None, sum(self.bkc.values()))
                 # AGENTV(self.aid, 'rating new BKC as', self.bkc_f)
@@ -186,15 +178,16 @@ class Agent():
             # AGENT(self.aid, 'keys are equal, compare BKC ratings')
             # Re-evaluate the received bkc, since the objective function may
             # have changed in the meantime
-            AGENTV(self.aid, 'given bkc_f =', bkc_f, 'by', bkc_creator,
-                   ', self.bkc_f =', self.bkc_f, 'by', self.bkc_creator)
+            # AGENTV(self.aid, 'given bkc_f =', bkc_f, 'by', bkc_creator,
+            #        ', self.bkc_f =', self.bkc_f, 'by', self.bkc_creator)
             if (self.bkc_f > bkc_f or
                     (self.bkc_f == bkc_f and self.bkc_creator > bkc_creator)):
                 # Cases 4 + 5: replace bkc
                 # AGENT(self.aid, 'replacing BKC')
-                self.bkc = bkc
+                self.bkc = dict(bkc)
                 self.bkc_f = bkc_f
                 self.bkc_creator = bkc_creator
+                self.bkc_keys = set(self.bkc.keys())
                 # Mark myself as dirty
                 self.dirty = True
         # else:
@@ -202,6 +195,29 @@ class Agent():
         #            'f =', self.bkc_f, ', given bkc has', bkc.keys(), 'f =',
         #            bkc_f)
         # AGENTV(self.aid, 'dirty =', self.dirty)
+
+    def update(self, aid, objective, gossip_updates, bkc, bkc_creator,
+               bkc_keys, bkc_f):
+        # Agent
+        if not aid in self.peers:
+            WARNING(self.aid, 'got update from unknown sender', aid)
+            # return
+        # AGENTV(self.aid, 'update() from', aid)
+
+        # Update objective
+        if (self.objective is None or
+                self.objective.instance < objective.instance):
+            self.notify(objective)
+
+        # AgentGossip
+        # AGENT(self.aid, 'receiving gossip_updates_inbox:', gossip_updates)
+        self.update_gossip(gossip_updates)
+        # AGENT(self.aid, 'updated gossip_updates_inbox:',
+        #       self.gossip_updates_inbox)
+
+        # AgentGossipBKC
+        self.update_bkc(aid, bkc, bkc_creator, bkc_keys, bkc_f)
+
 
     def notify(self, objective):
         self.objective = objective
@@ -298,4 +314,5 @@ class Agent():
         self.bkc_creator = self.aid
         self.bkc = d
         self.bkc_f = rating
+        self.bkc_keys = set(d.keys())
         # AGENT(self.aid, 'created new BKC with rating', rating)

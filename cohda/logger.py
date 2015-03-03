@@ -51,6 +51,8 @@ def MSG():
 
 
 def log(lvl, *msg):
+    if LOG_LEVEL >= 1000:
+        return
     message = _string(*msg)
     if (lvl == FILTER_LVL or
             FILTER == None or any([True for f in FILTER if f in message])):

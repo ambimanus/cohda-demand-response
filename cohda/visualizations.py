@@ -27,6 +27,9 @@ class Stats(object):
         self.full_bkc_ratings = {}
         self.switches = 0
         self.message_counter = 0
+        self.agent_keys = sorted(self.agents.keys())
+        self.aid_m = None
+        self.active = False
 
         for aid in self.cfg.agent_ids:
             self.solution[aid] = self.cfg.sol_init[aid]
@@ -36,22 +39,36 @@ class Stats(object):
         d_min, d_max = self.cfg.sol_d_min, self.cfg.sol_d_max
         obj = self.cfg.objective
 
+        self.active = False
         # Collect agent states
-        for aid in sorted(self.agents.keys()):
+        for aid in self.agent_keys:
             a = self.agents[aid]
+            self.active = self.active or a.dirty
             if self.solution[aid] != a.sol:
                 self.solution[aid] = a.sol
                 self.new_solution = True
-            if a.bkc is not None:
-                self.bkc_sizes[aid] = len(a.bkc)
             if a.bkc_f is not None:
+                s = len(a.bkc)
+                self.bkc_sizes[aid] = s
+                s_n = s / self.cfg.opt_m
+                if s_n > self.bkcmin_size:
+                    self.bkcmin_size = s_n
                 self.bkc_ratings[aid] = a.bkc_f
-                if len(a.bkc) == self.cfg.opt_m:
+                if s_n == 1.0:
                     self.full_bkc_ratings[aid] = a.bkc_f
                 else:
                     # Sanity check. This must not happen.
                     assert aid not in self.full_bkc_ratings
+                bm_norm = util.norm(d_min, d_max, a.bkc_f)
+                if s_n >= self.bkcmin_size and bm_norm < self.bkcmin:
+                    self.bkcmin = bm_norm
+                    self.aid_m = aid
 
+        if self.new_solution:
+            self.bkc_history[current_time] = self.bkcmin
+
+        if logger.LOG_LEVEL >= 1000:
+            return
         # sel := keys of bkc values that should be considered.
         # At the beginning of the simulation, report all bkc values.
         # But as soon as the first complete one has be found, restrict the
@@ -143,16 +160,17 @@ class Stats(object):
             INFO('Stopping (max simulation steps reached)')
             return False
         # Search final bkc
-        aid_m = None if len(self.full_bkc_ratings) == 0 else min(
-                self.full_bkc_ratings.iterkeys(),
-                key=(lambda key: self.bkc_ratings[key]))
+        # aid_m = None if len(self.full_bkc_ratings) == 0 else min(
+        #         self.full_bkc_ratings.iterkeys(),
+        #         key=(lambda key: self.bkc_ratings[key]))
         # Check mean bkc improvement over last x solutions
         # FIXME: This would stop the process in an unconverged state, so a
         #        post-processing step would be necessary to settle the current
         #        bkc in all agents.
         x = 10
         if (self.cfg.min_solution_gradient is not None and
-                self.bkcmin_size >= 1.0 and
+                self.aid_m is not None and
+                self.aid_m in self.full_bkc_ratings and
                 self.bkc_history is not None and
                 len(self.bkc_history) > x and
                 current_time in self.bkc_history):
@@ -163,25 +181,24 @@ class Stats(object):
                 s_post = self.bkc_history[keys[-i]]
                 grad += abs(s_pre - s_post)
             grad /= x
-            if grad < self.cfg.min_solution_gradient and aid_m is not None:
+            if grad < self.cfg.min_solution_gradient and self.aid_m is not None:
                 INFO('Stopping (min solution gradient reached)')
-                self.solution = self.agents[aid_m].bkc
+                self.solution = self.agents[self.aid_m].bkc
                 return False
         # Check minimum solution distance criterion
         # FIXME: This would stop the process in an unconverged state, so a
         #        post-processing step would be necessary to settle the current
         #        bkc in all agents.
         if (self.cfg.min_solution_distance is not None and
-                self.bkcmin_size >= 1.0 and
-                self.bkcmin <= self.cfg.min_solution_distance and
-                aid_m is not None):
+                self.aid_m is not None and
+                self.aid_m in self.full_bkc_ratings and
+                self.bkcmin <= self.cfg.min_solution_distance):
             INFO('Stopping (min solution distance reached)')
-            self.solution = self.agents[aid_m].bkc
+            self.solution = self.agents[self.aid_m].bkc
             return False
         # Check agent activity
-        for a in self.agents.values():
-            if a.dirty:
-                return True
+        if self.active:
+            return True
         INFO('Stopping (no agent activity)')
 
         return False
@@ -197,8 +214,8 @@ class Stats(object):
 
 
     def eval_final(self):
-        if not self.is_converged():
-            ERROR('convergence not reached!')
+        # if not self.is_converged():
+        #     ERROR('convergence not reached!')
         sol = sum(self.solution.values())
         for aid in sorted(self.agents.keys()):
             if self.cfg.sol_init[aid] != self.solution[aid]:
