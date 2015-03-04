@@ -18,16 +18,16 @@ def run(cfg_dict):
 
 
 if __name__ == '__main__':
-    runs = 1
+    runs = 10
     params = []
 
-    for lag in range(0, 3):
+    for lag in range(0, 6):
         for seed in range(runs):
             cfg_dict = {
                 'title': 'lag%02d' % lag,
                 'seed': seed,
-                'n': 20,
-                'it': 61,
+                'n': 1500,
+                'it': 1441,
                 'lag': lag,
             }
             params.append(cfg_dict)
