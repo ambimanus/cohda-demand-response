@@ -56,7 +56,7 @@
 # Random sleep (to prevent python compiling race conditions)
 sleep 0$(echo $RANDOM*0.00002 | bc)s
 # Start simulation
-source ~/env/crystal/bin/activate
+source ~/env/scipy/bin/activate
 python parallel.py
 
 exit
