@@ -10,6 +10,7 @@ import datetime
 
 import numpy as np
 import scipy as sp
+import scipy.linalg as la
 # import scipy.io as sio
 
 import configuration
@@ -187,8 +188,8 @@ def HeatPumpMatrixCalc(House):
 
     # Calculate state- and input-transition matrices of Eq 4.4
     T = House.T # time step
-    Omega = [sp.linalg.expm(A[i] * T) for i in range(House.N)]
-    Gamma = [sp.linalg.lstsq(A[i].T, (np.dot(B[i], Omega[i]) - B[i]).T)[0].T
+    Omega = [la.expm(A[i] * T) for i in range(House.N)]
+    Gamma = [la.lstsq(A[i].T, (np.dot(B[i], Omega[i]) - B[i]).T)[0].T
              for i in range(House.N)]
 
     return Omega, Gamma
