@@ -1,0 +1,12 @@
+- mkdir scipy
+- python virtualenv.py scipy
+    (alternativ: python virtualenv.py --distribute scipy)
+- source ~/env/scipy/bin/activate
+- link /usr/lib64/atlas/*.so.3 to ~/env/scipy/lib/*.so
+- pip install -d . numpy
+- pip install -d . scipy
+- tar -xf numpy-xyz.tar.gz
+- tar -xf scipy-xyz.tar.gz
+- in numpy-xyz/ und danach in scipy-xyz/:
+    - python setup.py build
+    - python setup.py install --prefix=~/env/scipy

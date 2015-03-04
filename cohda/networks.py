@@ -5,14 +5,17 @@ from __future__ import division
 import copy
 
 
-def unconnected(cfg, network=None):
-    return {n: list() for n in cfg.agent_ids}
+def unconnected(cfg):
+    network = {}
+    for n in cfg.agent_ids:
+        network[n] = list()
+    return network
 
 
 def sequence(cfg, network=None):
     ids = cfg.agent_ids
     if network is None:
-        network = {n: list() for n in ids}
+        network = unconnected(cfg)
     for i in range(len(ids)):
         for k in range(1, cfg.network_k + 1):
             if i + k < len(ids):
@@ -24,7 +27,7 @@ def sequence(cfg, network=None):
 def ring(cfg, network=None):
     ids = cfg.agent_ids
     if network is None:
-        network = {n: list() for n in ids}
+        network = unconnected(cfg)
     for i in range(len(ids)):
         for k in range(1, min(len(ids), cfg.network_k + 1)):
             node = (i + k) % len(ids)
@@ -45,7 +48,7 @@ def full(cfg, network=None):
 def half(cfg, network=None):
     ids = cfg.agent_ids
     if network is None:
-        network = {n: list() for n in ids}
+        network = unconnected(cfg)
     for n1 in ids[:len(ids)/2]:
         for n2 in ids[len(ids)/2:]:
             network[n1].append(n2)

@@ -1,0 +1,62 @@
+#!/bin/bash
+
+##############################################################################
+#                   Sun Grid Engine (SGE) Batch Job Script                   #
+#                  (RL, Unversity of Oldenburg, March 2011)                  #
+#                 Example for submitting a simple serial job                 #
+##############################################################################
+
+
+##############################################################################
+#                SGE directives (options to the qsub command)                #
+##############################################################################
+
+# NOTE: All lines containing SGE directives have to start with "#$"
+
+###################
+# General options #
+###################
+
+# which shell to use
+#$ -S /bin/bash
+
+# name of the job
+#$ -N uvic
+
+# change to directory where job was submitted from
+#$ -cwd
+
+
+####################################
+# Resource requirements of the job #
+####################################
+
+# maximum walltime of the job (hh:mm:ss)
+#$ -l h_rt=4:0:0
+
+# memory per job slot (= core)
+#$ -l h_vmem=4G
+
+# disk space
+#$ -l h_fsize=1G
+
+
+######################################
+# Specific options for parallel jobs #
+######################################
+
+# this is an array job
+#$ -t 1-100:1
+
+
+##############################################################################
+#                     Commands to be executed by the job                     #
+##############################################################################
+
+# Random sleep (to prevent python compiling race conditions)
+sleep 0$(echo $RANDOM*0.00002 | bc)s
+# Start simulation
+source ~/env/crystal/bin/activate
+python parallel.py
+
+exit
