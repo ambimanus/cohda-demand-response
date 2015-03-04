@@ -60,9 +60,35 @@ def WindGen(Wind):
     return P
 
 
+HOURS_PER_DAY = 24.
+MINUTES_PER_DAY = 60. * HOURS_PER_DAY
+SECONDS_PER_DAY = 60. * MINUTES_PER_DAY
+MUSECONDS_PER_DAY = 1e6 * SECONDS_PER_DAY
+
+
+def _to_ordinalf(dt):
+    """
+    Convert :mod:`datetime` to the Gregorian date as UTC float days,
+    preserving hours, minutes, seconds and microseconds.  Return value
+    is a :func:`float`.
+    """
+
+    if hasattr(dt, 'tzinfo') and dt.tzinfo is not None:
+        delta = dt.tzinfo.utcoffset(dt)
+        if delta is not None:
+            dt -= delta
+
+    base = float(dt.toordinal())
+    if hasattr(dt, 'hour'):
+        base += (dt.hour / HOURS_PER_DAY + dt.minute / MINUTES_PER_DAY +
+                 dt.second / SECONDS_PER_DAY +
+                 dt.microsecond / MUSECONDS_PER_DAY
+                 )
+    return base
+
+
 def import_M2(fn, it=1440):
     assert it <= 1440
-    import matplotlib.dates as mdates
     import datetime
 
     dd = ['object', 'object', 'float', 'float']
@@ -74,7 +100,7 @@ def import_M2(fn, it=1440):
         date = datetime.datetime.strptime(data['f0'][i], '%m/%d/%Y').date()
         time = datetime.datetime.strptime(data['f1'][i], '%H:%M').time()
         combined = datetime.datetime.combine(date, time)
-        x[i] = mdates.date2num(combined)
+        x[i] = _to_ordinalf(combined)
 
 
     lim_a, lim_b = dim - (3 * 1440), dim - (2 * 1440)

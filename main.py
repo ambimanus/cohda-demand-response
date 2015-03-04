@@ -11,10 +11,11 @@ import datetime
 import numpy as np
 import scipy as sp
 import scipy.io as sio
-import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle
 
+import configuration
 import stats
+# import analyze
+from WindGen import WindGen, import_M2
 from cohda import uvic as cohda
 from cohda import util
 
@@ -439,12 +440,14 @@ def OptimizerCOHDA(House, Target, it, relative=False):
     return House, Pmin, Pmax
 
 
-def main():
+def main(cfg):
     # This is the main script for running the COHDA optimizer on a given set of
     # scenario data files (demand response program attempt to follow a wind
     # generation profile).
 
-    np.random.seed(0)
+    cfg.ts_start = datetime.datetime.now()#.isoformat()
+
+    np.random.seed(cfg.seed)
 
     # Enviro.mat - Comment from Adam:
     # The Enviro.mat data was simply an arbitrarily scaled temperature profile from
@@ -469,7 +472,7 @@ def main():
     # system performance. This unresponsive load data is used by the 'Grid' module
     # to determine how much additional generation is required to satisfy community
     # loads with or without demand response.
-    UnresponsiveLoad = sio.loadmat('UnresponsiveLoad.mat')
+    # UnresponsiveLoad = sio.loadmat('UnresponsiveLoad.mat')
 
     # Wind.mat - Comment from Adam:
     # The Wind.mat data is wind generation from a wind turbine (I believe I used a
@@ -488,10 +491,10 @@ def main():
     # participating loads in the demand response scenario, as you stated above. We
     # used a population of 100 homes, mostly due to computer processing time, as
     # larger populations required significantly more time to run.
-    n = 1500
+    n = cfg.n
 
     # it = number of simulation steps.
-    it = 1441
+    it = cfg.it
 
     # scale_w = n / 2000
     # scale_u = -5 * n / 2000
@@ -502,8 +505,7 @@ def main():
 
     # Enviro
     # http://www.nrel.gov/midc/nwtc_m2/
-    from WindGen import WindGen, import_M2
-    datetimes, temperature, windspeed, windpower = import_M2('z7165526.txt', it=it - 1)
+    datetimes, temperature, windspeed, windpower = import_M2(cfg.enviro, it=it - 1)
     # windspeed_2 = (windspeed + np.random.normal(windspeed.mean(), windspeed.std() / 5, len(windspeed))) / 1.6
     # windpower_2 = WindGen(windspeed_2, it=it - 1)
     # windpower = windpower + windpower_2
@@ -523,8 +525,8 @@ def main():
     # Target = -1 * w
     # Set target as negative wind power fluctuation
     Target = np.zeros(it)
-    # Target[1:] = -1 * (w[1:] - w[:-1])
-    Target[2:] = (-1 * (w[1:] - w[:-1]))[:-1]
+    # # Target[1:] = -1 * (w[1:] - w[:-1])
+    Target[1 + cfg.lag:] = (-1 * (w[1:] - w[:-1]))[:it - 1 - cfg.lag]
 
     # plt.plot(w, label='Wind')
     # # plt.plot(u, label='Unresponsive Load')
@@ -554,129 +556,36 @@ def main():
 
 
     # Store the results
-    ts = datetime.datetime.now().isoformat()
-    basepath = 'data'
-    fn1 = str(os.path.join(basepath, '.'.join(('House', ts, 'pickle'))))
-    fn2 = str(os.path.join(basepath, '.'.join(('House_uncontrolled', ts, 'pickle'))))
-    fn3 = str(os.path.join(basepath, '.'.join(('w', ts, 'npy'))))
-    with open(fn1, 'w') as f:
-        pickle.dump(dict(House), f)
-    with open(fn2, 'w') as f:
-        pickle.dump(dict(House_uncontrolled), f)
-    np.save(fn3, w)
+    cfg.House = dict(House)
+    cfg.House_uncontrolled = dict(House_uncontrolled)
+    cfg.w = w
+    cfg.Target = Target
+    cfg.ts_end = datetime.datetime.now()#.isoformat()
+    return cfg
 
-    return fn1, fn2, fn3
+    # fn1 = str(os.path.join(basepath, '.'.join(('House', ts, 'pickle'))))
+    # fn2 = str(os.path.join(basepath, '.'.join(('House_uncontrolled', ts, 'pickle'))))
+    # fn3 = str(os.path.join(basepath, '.'.join(('w', ts, 'npy'))))
+    # with open(fn1, 'w') as f:
+    #     pickle.dump(dict(House), f)
+    # with open(fn2, 'w') as f:
+    #     pickle.dump(dict(House_uncontrolled), f)
+    # np.save(fn3, w)
 
-
-def show(House, House_uncontrolled, w):
-    it = w.shape[-1]
-
-    # Resample the results to 15 minute resolution?
-    res = 1
-    def resample(d, resolution):
-        return d.reshape(d.shape[0]/resolution, resolution).sum(1) / resolution
-
-    # Display the results
-    fig = plt.figure()
-
-    # bias_P_r = House.P_r.sum(0)[0]
-    # bias_wind = w[0]
-    bias = House.P_r.sum(0)[0] - w[0]
-
-    follow = House.P_r.sum(0) - bias
-
-    target = np.zeros(it)
-    # no control actions in the first two intervals
-    target[:2] = House.P_r[:,:2].sum(0) - bias
-    target[2:] = House.P_target[2:] - bias
-
-    # f_pmin, f_pmax = np.zeros(it), np.zeros(it)
-    f_pmin = House.Pmin - bias
-    f_pmax = House.Pmax - bias
-
-
-    diff = np.zeros(it)
-    diff[1:] = np.array(follow - target + w)[:-1]
-    diff_pmin, diff_pmax = np.array(f_pmin), np.array(f_pmax)
-    diff_pmin[2:] = np.array(f_pmin - target + w)[1:-1]
-    diff_pmax[2:] = np.array(f_pmax - target + w)[1:-1]
-    # JAY!!!
-
-    ax = fig.add_subplot(411)
-    ax.set_ylabel('P$_{\\mathrm{el}}$ [kW]')
-    ax.plot(resample(w[1 : it], res), label='Wind Power', lw=0.5)
-    ax.fill_between(np.arange((it - 1) // res),
-                    resample(diff_pmin[1: it], res),
-                    resample(diff_pmax[1: it], res),
-                     color=(0.5, 0.5, 0.5, 0.25), lw=0.0)
-    # ax.plot(resample(f_pmin[1 : it], res), label='pmin')
-    # ax.plot(resample(f_pmax[1 : it], res), label='pmax')
-    fill_proxy = Rectangle((0, 0), 1, 1, fc=(0.5, 0.5, 0.5, 0.25), ec='w', lw=0.0)
-    ax.plot(resample(diff[1 : it], res), label='Heat Pump Power Dispatched', color='k')
-    lhl = ax.get_legend_handles_labels()
-    ax.legend(lhl[0] + [fill_proxy], lhl[1] + ['Capacity'], framealpha=0.5)
-
-
-    ax = fig.add_subplot(412, sharex=ax)
-    # plt.setp(ax.spines.values(), color='k')
-    # plt.setp([ax.get_xticklines(), ax.get_yticklines()], color='k')
-    ax.set_ylabel('P$_{\\mathrm{el}}$ [kW]')
-    # ax.plot(resample((diff - w)[1 : it], res), label='Error', color='k')
-    # ax.fill_between(np.arange((it - 1) // res),
-    #                 -1 * resample(House.Pmin[1 : it] + Target[1 : it], res),
-    #                 -1 * resample(House.Pmax[1 : it] + Target[1 : it], res),
-    #                  color=(0.5, 0.5, 0.5, 0.25), lw=0.0)
-    ax.plot(resample(w - House_uncontrolled.P_r.sum(0), res), label='resulting load (reference)')
-    ax.plot(resample(w - House.P_r.sum(0), res), label='resulting load (controlled)')
-
-    # lhl = ax.get_legend_handles_labels()
-    # ax.legend(lhl[0] + [fill_proxy], lhl[1] + ['Flexibility'], loc='upper left')
-    ax.legend(framealpha=0.5)
-
-
-    ax = fig.add_subplot(413, sharex=ax)
-    # plt.setp(ax.spines.values(), color='k')
-    # plt.setp([ax.get_xticklines(), ax.get_yticklines()], color='k')
-    # ax.set_xlabel('simulation horizon [minutes]')
-    ax.set_ylabel('T$_{\\mathrm{air}}^{\\mathrm{(reference)}}$ [\\textdegree{}C]')
-    ax.set_ylim(18.9, 21.1)
-    # ax.axhspan(19.75, 20.25, fc=(0.5, 0.5, 0.5, 0.2), ec=(1, 1, 1, 0))
-    for ts in House_uncontrolled.T_a[:, 1 : it]:
-        ax.plot(resample(ts, res), color=(0.5, 0.5, 0.5, 0.1))
-
-
-    ax = fig.add_subplot(414, sharex=ax)
-    # plt.setp(ax.spines.values(), color='k')
-    # plt.setp([ax.get_xticklines(), ax.get_yticklines()], color='k')
-    # ax.set_xlabel('simulation horizon [minutes]')
-    ax.set_ylabel('T$_{\\mathrm{air}}^{\\mathrm{(controlled)}}$ [\\textdegree{}C]')
-    ax.set_ylim(18.9, 21.1)
-    # ax.axhspan(19.75, 20.25, fc=(0.5, 0.5, 0.5, 0.2), ec=(1, 1, 1, 0))
-    for ts in House.T_a[:, 1 : it]:
-        ax.plot(resample(ts, res), color=(0.5, 0.5, 0.5, 0.1))
-
-
-    # ax = fig.add_subplot(414, sharex=ax)
-    # # plt.setp(ax.spines.values(), color='k')
-    # # plt.setp([ax.get_xticklines(), ax.get_yticklines()], color='k')
-    # ax.set_xlabel('simulation horizon [minutes]')
-    # ax.set_ylabel('messages')
-    # # ax.set_ylim(18.9, 21.1)
-    # # ax.axhspan(19.75, 20.25, fc=(0.5, 0.5, 0.5, 0.2), ec=(1, 1, 1, 0))
-    # ax.plot(resample(House.message_counter[1 : it], res))
-
-    # plt.ion()
-    # plt.show()
-    # import pdb
-    # pdb.set_trace()
-    plt.show()
+    # return fn1, fn2, fn3
 
 
 if __name__ == '__main__':
-    fn1, fn2, fn3 = main()
-    with open(fn1) as f:
-        d1 = pickle.load(f)
-    with open(fn2) as f:
-        d2 = pickle.load(f)
-    d3 = np.load(fn3)
-    show(DotDict(other=d1), DotDict(other=d2), d3)
+    cfg = main(configuration.Configuration(n=1500, it=1441, lag=0))
+    fn = str(os.path.join(cfg.basepath, '.'.join(
+            ('cfg', cfg.ts_start.isoformat(), str(cfg.seed), 'pickle'))))
+    with open(fn, 'w') as f:
+        pickle.dump(cfg, f)
+
+    # fn1, fn2, fn3 = main()
+    # with open(fn1) as f:
+    #     d1 = pickle.load(f)
+    # with open(fn2) as f:
+    #     d2 = pickle.load(f)
+    # d3 = np.load(fn3)
+    # analyze.plot(DotDict(other=d1), DotDict(other=d2), d3)
