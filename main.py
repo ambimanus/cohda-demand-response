@@ -10,12 +10,12 @@ import datetime
 
 import numpy as np
 import scipy as sp
-import scipy.io as sio
+# import scipy.io as sio
 
 import configuration
-import stats
+# import stats
 # import analyze
-from WindGen import WindGen, import_M2
+from WindGen import import_M2
 from cohda import uvic as cohda
 from cohda import util
 
@@ -262,8 +262,12 @@ def COHDA_Interface(House, temperature, Target, Omega, Gamma, relative=False):
 
         seed = 0
         target = House.P_target[it + 1]
-        states = {uid: House.n[uid, it] * House.P[uid] for uid in range(House.N)} # Current Power of unit
-        opt_w = {uid: map(float, [Pmin[uid], Pmax[uid]]) for uid in range(House.N)}
+        states, opt_w = {}, {}
+        for uid in range(House.N):
+            states[uid] = House.n[uid, it] * House.P[uid] # Current Power of unit
+            opt_w[uid] = map(float, [Pmin[uid], Pmax[uid]])
+        # states = {uid: House.n[uid, it] * House.P[uid] for uid in range(House.N)}
+        # opt_w = {uid: map(float, [Pmin[uid], Pmax[uid]]) for uid in range(House.N)}
         stats = cohda.run(seed, target, states, Prob, opt_w)
 
         House.n[:, it + 1] = np.array(stats.solution.values()) / House.P
@@ -578,7 +582,7 @@ def main(cfg):
 if __name__ == '__main__':
     cfg = main(configuration.Configuration(n=1500, it=1441, lag=0))
     fn = str(os.path.join(cfg.basepath, '.'.join(
-            ('cfg', cfg.ts_start.isoformat(), str(cfg.seed), 'pickle'))))
+            ('cfg', cfg.title, str(cfg.seed), 'pickle'))))
     with open(fn, 'w') as f:
         pickle.dump(cfg, f)
 
