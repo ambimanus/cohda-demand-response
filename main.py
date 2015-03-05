@@ -581,7 +581,7 @@ def main(cfg):
 
 
 if __name__ == '__main__':
-    cfg = main(configuration.Configuration(n=1500, it=1441, lag=0))
+    cfg = main(configuration.Configuration(n=200, it=1441, lag=0))
     fn = str(os.path.join(cfg.basepath, '.'.join(
             ('cfg', cfg.title, str(cfg.seed), 'pickle'))))
     with open(fn, 'w') as f:

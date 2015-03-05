@@ -1,6 +1,10 @@
 from __future__ import division
 
+import math
+
 import numpy as np
+import scipy.signal as sig
+import scipy.stats as stats
 
 
 def WindGen(Wind):
@@ -123,19 +127,44 @@ if __name__ == '__main__':
 
     fn = sys.argv[1]
     datetimes, temperature, windspeed, windpower = import_M2(fn)
-    # windspeed_2 = (windspeed + np.random.normal(windspeed.mean(), windspeed.std() / 5, len(windspeed))) / 1.6
+
+    # savgol = sig.savgol_filter(windspeed, 71, 2)
+
+    # Normal distribution
+    # windspeed_2 = (0.9 * savgol + np.random.normal(savgol.mean(), (windspeed - savgol).std() / 1.5, len(savgol)) - savgol.mean())
     # windpower_2 = WindGen(windspeed_2)
 
-    # import pdb
-    # pdb.set_trace()
+    # Weibull distribution
+    # meas_param = stats.exponweib.fit(windspeed - savgol, loc=0)
+    # weibull = stats.exponweib(*meas_param)
+    # windspeed_2 = weibull.rvs(windspeed.shape[-1]) * 0.9 + savgol - 1# / windspeed.mean()# + savgol
+    # windpower_2 = WindGen(windspeed_2)
+    #
+    # BINS = 100
+    # hist, bins = np.histogram(windspeed, bins=BINS, density=True)
+    # # hist /= BINS
+    # plt.bar(bins[:-1], hist, width=0.1)
+    # x = np.linspace(windspeed.min(), windspeed.max(), 1000)
+    # plt.plot(x, weibull.pdf(x))
+    # # import pdb
+    # # pdb.set_trace()
+    # # labels
+    # plt.xlabel('Fluctuation [m/s]')
+    # plt.ylabel('Probability')
+    # plt.show()
+    # sys.exit(0)
 
-    plt.plot_date(datetimes, temperature, '-', label='Temperature [\\textdegree{}C]')
+
+
+
+    # plt.plot_date(datetimes, temperature, '-', label='Temperature [\\textdegree{}C]')
     plt.plot_date(datetimes, windspeed, '-', label='Wind Speed [m/s]')
     # plt.plot_date(datetimes, windspeed_2, '-', label='Wind Speed 2 [m/s]')
     plt.plot_date(datetimes, windpower / 1000, '-', label='Wind Power [MW]')
     # plt.plot_date(datetimes, windpower_2 / 1000, '-', label='Wind Power 2 [MW]')
     plt.legend()
     plt.show()
+
     sys.exit(0)
 
-    np.save('.'.join((fn.split('.')[0], 'npy')), windpower)
+    # np.save('.'.join((fn.split('.')[0], 'npy')), windpower)
