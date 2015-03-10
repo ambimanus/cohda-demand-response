@@ -153,7 +153,7 @@ def stats(reductions_dict):
     # xloc = ticker.FixedLocator(xpos)
     # xloc = ticker.MaxNLocator(nbins=6, prune=None)
     xloc = ticker.AutoLocator()
-    boxplot(ax, data, keys, 'Delay [s]', 'Fluctuations [\%]',
+    boxplot(ax, data, keys, 'Delay [s]', '$\mathit{ROF}$ [\%]',
             xloc=xloc, xpos=xpos, xlim=xlim)
     plt.show()
 
@@ -249,45 +249,58 @@ def plot(cfg, s=0):
 
     red = _reduction(res_u, res_c)
     print 'Reduction: %.2f' % red
+    print 'Messages: %.2f +- %.2f' % (np.mean(House.message_counter), np.std(House.message_counter))
 
     # Display the results
-    fig = plt.figure()
+    fig = plt.figure(figsize=(6.39, 3.5))
     # fig.subplots_adjust(left=0.125, right=0.975, bottom=0.075, top=0.975)
-    fig.subplots_adjust(left=0.125, right=0.975, bottom=0.15, top=0.975)
+    fig.subplots_adjust(left=0.125, right=0.975, bottom=0.125, top=0.975)
     # Resample the results to 15 minute resolution?
     res = 1
 
-    ax = fig.add_subplot(211)
+    ax = fig.add_subplot(311)
     ax.set_ylabel('P$_{\\mathrm{el}}$ [kW]')
-    ax.set_ylim(-1000, 2000)
-    l_w, = ax.plot(resample(w[1 : it], res), label='Wind Power', lw=0.5)
+    ax.set_ylim(-2000, 3000)
+    # ax.set_ylim(-1000, 2000)
+    l_w, = ax.plot(resample(w[1 : it], res), label='Wind Power', color='b', lw=0.25)
     # l_w.set_dashes([0.5, 0.5])
-    l_w.set_dashes([1.0, 0.5])
+    l_w.set_dashes([1.0, 0.75])
     ax.fill_between(np.arange((it - 1) // res),
                     resample(diff_pmin[1: it], res),
                     resample(diff_pmax[1: it], res),
-                     color=(0.5, 0.5, 0.5, 0.25), lw=0.0)
+                     color=(0.5, 0.5, 0.5, 0.15), lw=0.0)
     # ax.plot(resample(f_pmin[1 : it], res), label='pmin')
     # ax.plot(resample(f_pmax[1 : it], res), label='pmax')
-    fill_proxy = Rectangle((0, 0), 1, 1, fc=(0.5, 0.5, 0.5, 0.25), ec='w', lw=0.0)
-    ax.plot(resample(diff[1 : it], res), label='Heat Pump Power Dispatched', color='k')
+    fill_proxy = Rectangle((0, 0), 1, 1, fc=(0.5, 0.5, 0.5, 0.15), ec='w', lw=0.0)
+    ax.plot(resample(diff[1 : it], res), label='Heat Pump Power Dispatched', color='k', lw=0.25)
     lhl = ax.get_legend_handles_labels()
     ax.legend(lhl[0] + [fill_proxy], lhl[1] + ['Capacity'], framealpha=0.5)
+    plt.setp(ax.get_xticklabels(), visible=False)
 
 
-    ax = fig.add_subplot(212, sharex=ax)
+    ax = fig.add_subplot(312, sharex=ax)
+    # plt.setp(ax.spines.values(), color='k')
+    # plt.setp([ax.get_xticklines(), ax.get_yticklines()], color='k')
+    ax.set_ylabel('P$_{\\mathrm{el}}$ [kW]', labelpad=11)
+    # ax.set_ylim(-350, 950)
+    ax.plot(resample((diff - w)[1 : it], res), label='Error', color='k', lw=0.25)
+    ax.legend(framealpha=0.5)
+    plt.setp(ax.get_xticklabels(), visible=False)
+
+
+    ax = fig.add_subplot(313, sharex=ax)
     # plt.setp(ax.spines.values(), color='k')
     # plt.setp([ax.get_xticklines(), ax.get_yticklines()], color='k')
     ax.set_ylabel('P$_{\\mathrm{el}}$ [kW]')
-    ax.set_ylim(-2000, 1500)
+    # ax.set_ylim(-2000, 1500)
     # ax.plot(resample((diff - w)[1 : it], res), label='Error', color='k')
     # ax.fill_between(np.arange((it - 1) // res),
     #                 -1 * resample(House.Pmin[1 : it] + Target[1 : it], res),
     #                 -1 * resample(House.Pmax[1 : it] + Target[1 : it], res),
     #                  color=(0.5, 0.5, 0.5, 0.25), lw=0.0)
-    l_res_u, = ax.plot(resample(res_u, res), label='resulting load (reference)')
-    l_res_u.set_dashes([1.0, 0.5])
-    ax.plot(resample(res_c, res), label='resulting load (controlled)')
+    l_res_u, = ax.plot(resample(res_u, res), label='resulting load (reference)', color='#7A68A6', lw=0.25)
+    l_res_u.set_dashes([1.0, 0.75])
+    ax.plot(resample(res_c, res), label='resulting load (controlled)', color='k', lw=0.25)
     # ax.plot(savgol, label='Savitzky-Golay')
 
     # lhl = ax.get_legend_handles_labels()
@@ -318,7 +331,8 @@ def plot(cfg, s=0):
     # for ts in House.T_a[:, 1 : it]:
     #     ax.plot(resample(ts, res), color=(0.5, 0.5, 0.5, 0.1))
 
-    ax.set_xlim(790, 1210)
+    ax.set_xlim(0, 1440)
+    # ax.set_xlim(790, 1210)
     # ax = fig.add_subplot(414, sharex=ax)
     # # plt.setp(ax.spines.values(), color='k')
     # # plt.setp([ax.get_xticklines(), ax.get_yticklines()], color='k')
@@ -391,5 +405,6 @@ if __name__ == '__main__':
                 for s in range(0, s_max + 1, s_step):
                     res_c = w - shift(House.P_r.sum(0), s)
                     res_u = w - shift(House_uncontrolled.P_r.sum(0), s)
-                    red_dict[s].append(_fluctuation_remaining(res_u, res_c))
+                    # red_dict[s].append(_fluctuation_remaining(res_u, res_c))
+                    red_dict[s].append(_reduction(res_u, res_c))
         stats(red_dict)

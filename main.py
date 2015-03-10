@@ -245,6 +245,8 @@ def COHDA_Interface(House, temperature, Target, Omega, Gamma, relative=False):
         np.logical_and(House.n[:, 0] == 1, House.e[:, 0] <= eset1)
     )
 
+    statistics = []
+
     for it in range(k):
         # House.n[:, it] = np.logical_or(
         #     np.logical_and(House.n[:, it] == 0, House.e[:, it] <= -eset1),
@@ -274,12 +276,15 @@ def COHDA_Interface(House, temperature, Target, Omega, Gamma, relative=False):
         House.n[:, it + 1] = np.array(stats.solution.values()) / House.P
         House.message_counter[it + 1] = stats.message_counter
 
+        statistics.append(stats.bkc_history)
+        print max(stats.bkc_history.keys()),
+
     # Simulate last time step
     House = HeatPump(House, temperature, k, Omega, Gamma)
 
     print
 
-    return House
+    return House, statistics
 
 
 def HeatPump(House, temperature, it, Omega, Gamma, progress=None):
@@ -557,7 +562,7 @@ def main(cfg):
     # Run the simulation with the COHDA optimizer.
     # The simulation interprets load as positive power, so scale by -1.
     print 'COHDA'
-    House = COHDA_Interface(House, temperature, -1 * Target, Omega, Gamma, relative=True)
+    House, statistics = COHDA_Interface(House, temperature, -1 * Target, Omega, Gamma, relative=True)
 
 
     # Store the results
@@ -565,6 +570,7 @@ def main(cfg):
     cfg.House_uncontrolled = dict(House_uncontrolled)
     cfg.w = w
     cfg.Target = Target
+    cfg.stats = statistics
     cfg.ts_end = datetime.datetime.now()#.isoformat()
     return cfg
 
@@ -581,7 +587,7 @@ def main(cfg):
 
 
 if __name__ == '__main__':
-    cfg = main(configuration.Configuration(n=200, it=1441, lag=0))
+    cfg = main(configuration.Configuration(n=1000, it=1441, lag=0))
     fn = str(os.path.join(cfg.basepath, '.'.join(
             ('cfg', cfg.title, str(cfg.seed), 'pickle'))))
     with open(fn, 'w') as f:
